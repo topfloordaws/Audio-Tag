@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A8032F402E0BD7FB0022309A /* ffmpeg in Resources */ = {isa = PBXBuildFile; fileRef = A8032F3F2E0BD7FB0022309A /* ffmpeg */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A8032ED52E0BB5F30022309A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,14 +31,10 @@
 		A8032EC32E0BB5F20022309A /* Audio Tag.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Audio Tag.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8032ED42E0BB5F30022309A /* Audio TagTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Audio TagTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8032EDE2E0BB5F30022309A /* Audio TagUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Audio TagUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A8032F3F2E0BD7FB0022309A /* ffmpeg */ = {isa = PBXFileReference; lastKnownFileType = text; path = ffmpeg; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A8032EC52E0BB5F20022309A /* Audio Tag */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Audio Tag";
-			sourceTree = "<group>";
-		};
 		A8032ED72E0BB5F30022309A /* Audio TagTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Audio TagTests";
@@ -43,6 +43,11 @@
 		A8032EE12E0BB5F30022309A /* Audio TagUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Audio TagUITests";
+			sourceTree = "<group>";
+		};
+		A8032F222E0BCFCF0022309A /* Audio Tag */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Audio Tag";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -75,7 +80,8 @@
 		A8032EBA2E0BB5F20022309A = {
 			isa = PBXGroup;
 			children = (
-				A8032EC52E0BB5F20022309A /* Audio Tag */,
+				A8032F222E0BCFCF0022309A /* Audio Tag */,
+				A8032F202E0BCD960022309A /* Resources */,
 				A8032ED72E0BB5F30022309A /* Audio TagTests */,
 				A8032EE12E0BB5F30022309A /* Audio TagUITests */,
 				A8032EC42E0BB5F20022309A /* Products */,
@@ -92,6 +98,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A8032F202E0BCD960022309A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A8032F3F2E0BD7FB0022309A /* ffmpeg */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -102,13 +116,14 @@
 				A8032EBF2E0BB5F20022309A /* Sources */,
 				A8032EC02E0BB5F20022309A /* Frameworks */,
 				A8032EC12E0BB5F20022309A /* Resources */,
+				A8032F3A2E0BD3F20022309A /* ShellScript */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				A8032EC52E0BB5F20022309A /* Audio Tag */,
+				A8032F222E0BCFCF0022309A /* Audio Tag */,
 			);
 			name = "Audio Tag";
 			packageProductDependencies = (
@@ -195,6 +210,8 @@
 			);
 			mainGroup = A8032EBA2E0BB5F20022309A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A8032EC42E0BB5F20022309A /* Products */;
 			projectDirPath = "";
@@ -212,6 +229,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A8032F402E0BD7FB0022309A /* ffmpeg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,6 +248,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A8032F3A2E0BD3F20022309A /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "chmod +x \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ffmpeg\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A8032EBF2E0BB5F20022309A /* Sources */ = {

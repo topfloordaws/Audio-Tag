@@ -1,3 +1,10 @@
+//
+//  ContentView.swift
+//  Audio Tag
+//
+//  Created by Dawson Pham on 6/24/25.
+//
+
 import SwiftUI
 import AppKit
 
@@ -9,8 +16,8 @@ struct ContentView: View {
     @State private var yearText   = ""
     @State private var status     = ""
 
-    let converter = AudioConverter()
-    let tagger    = AudioConverter()  // uses the same converter for tagging
+    private let converter = AudioConverter()
+    private let tagger    = AudioConverter()  // same type used for tagging
 
     var body: some View {
         VStack(spacing: 20) {
@@ -39,21 +46,35 @@ struct ContentView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
 
                 Button("Apply Tags") {
-                    tagMP3(
-                        url: url,
-                        title:  titleText,
-                        artist: artistText,
-                        album:  albumText,
-                        year:   yearText
-                    )
+                    status = "⏳ Tagging…"
+                    tagger.tagMP3(
+                        file:   url,
+                        title:  titleText.isEmpty  ? nil : titleText,
+                        artist: artistText.isEmpty ? nil : artistText,
+                        album:  albumText.isEmpty  ? nil : albumText,
+                        year:   yearText.isEmpty   ? nil : yearText
+                    ) { result in
+                        DispatchQueue.main.async {
+                            switch result {
+                            case .success:
+                                status = "✅ Tags updated!"
+                            case .failure(let err):
+                                status = "❌ Tag error: \(err.localizedDescription)"
+                            }
+                        }
+                    }
                 }
 
                 Divider().padding(.vertical)
 
                 // 3) Format conversions
                 HStack(spacing: 30) {
-                    Button("→ MP3") { convert(url, toExt: "mp3") }
-                    Button("→ M4A") { convert(url, toExt: "m4a") }
+                    Button("→ MP3") {
+                        convert(url, toExt: "mp3")
+                    }
+                    Button("→ M4A") {
+                        convert(url, toExt: "m4a")
+                    }
                 }
             }
 
@@ -70,38 +91,37 @@ struct ContentView: View {
 
     // MARK: – Helpers
 
-    private func tagMP3(
-        url: URL,
-        title: String,
-        artist: String,
-        album: String,
-        year: String
-    ) {
-        do {
-            try converter.tagMP3(
-                file: url,
-                title:  title.isEmpty  ? nil : title,
-                artist: artist.isEmpty ? nil : artist,
-                album:  album.isEmpty  ? nil : album,
-                year:   year.isEmpty   ? nil : year
-            )
-            status = "✅ Tags updated!"
-        } catch {
-            status = "❌ Tag error: \(error.localizedDescription)"
-        }
-    }
-
     private func convert(_ url: URL, toExt ext: String) {
-        let out = url.deletingPathExtension().appendingPathExtension(ext)
-        do {
-            switch ext {
-            case "mp3": try converter.toMP3(input: url, output: out)
-            case "m4a": try converter.toM4A(input: url, output: out)
-            default:    break
+        let out = url.deletingPathExtension()
+                     .appendingPathExtension(ext)
+        status = "⏳ Converting…"
+        switch ext {
+        case "mp3":
+            converter.toMP3(input: url, output: out) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        status = "✅ Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "❌ Conv. error: \(err.localizedDescription)"
+                    }
+                }
             }
-            status = "✅ Saved \(out.lastPathComponent)"
-        } catch {
-            status = "❌ Conv. error: \(error.localizedDescription)"
+
+        case "m4a":
+            converter.toM4A(input: url, output: out) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        status = "✅ Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "❌ Conv. error: \(err.localizedDescription)"
+                    }
+                }
+            }
+
+        default:
+            break
         }
     }
 }

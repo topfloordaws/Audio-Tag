@@ -6,91 +6,113 @@
 //
 
 import Foundation
+import ffmpegkit
 
-/// Wraps your bundled `ffmpeg` for all conversions and metadata copying.
+/// Wraps FFmpegKit calls for audio conversions and metadata copying.
 struct AudioConverter {
-    private var ffmpegURL: URL {
-        Bundle.main.url(forResource: "ffmpeg", withExtension: nil)!
-    }
-
-    private func runFFmpeg(_ arguments: [String]) throws {
-        let task = Process()
-        task.executableURL = ffmpegURL
-        task.arguments     = arguments
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError  = pipe
-
-        try task.run()
-        task.waitUntilExit()
-
-        guard task.terminationStatus == 0 else {
-            let data   = pipe.fileHandleForReading.readDataToEndOfFile()
-            // ← use UTF8.self here
-            let output = String(decoding: data, as: UTF8.self)
-            throw NSError(
-                domain: "FFmpegError",
-                code: Int(task.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: output]
-            )
+    
+    /// Convert any audio file → MP3 (libmp3lame VBR quality 2)
+    func toMP3(input: URL, output: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        // quote paths in case they contain spaces
+        let cmd = """
+        -y -i '\(input.path)' \
+        -codec:a libmp3lame -qscale:a 2 \
+        '\(output.path)'
+        """
+        FFmpegKit.executeAsync(cmd) { session in
+            guard let session = session else {
+                completion(.failure(NSError(domain: "FFmpegKit", code: -1)))
+                return
+            }
+            if session.getReturnCode()?.isValueSuccess() == true {
+                completion(.success(()))
+            } else {
+                let logs = session.getAllLogsAsString() ?? ""
+                let code = Int(session.getReturnCode()?.getValue() ?? -1)
+                let err  = NSError(
+                    domain: "FFmpegKit",
+                    code: code,
+                    userInfo: [NSLocalizedDescriptionKey: logs]
+                )
+                completion(.failure(err))
+            }
         }
     }
-
-    /// Format conversions
-
-    func toMP3(input: URL, output: URL) throws {
-        try runFFmpeg([
-            "-y", "-i", input.path,
-            "-codec:a", "libmp3lame", "-qscale:a", "2",
-            output.path
-        ])
+    
+    /// Convert any audio file → M4A (AAC 192 kbps)
+    func toM4A(input: URL, output: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        let cmd = """
+        -y -i '\(input.path)' \
+        -codec:a aac -b:a 192k \
+        '\(output.path)'
+        """
+        FFmpegKit.executeAsync(cmd) { session in
+            guard let session = session else {
+                completion(.failure(NSError(domain: "FFmpegKit", code: -1)))
+                return
+            }
+            if session.getReturnCode()?.isValueSuccess() == true {
+                completion(.success(()))
+            } else {
+                let logs = session.getAllLogsAsString() ?? ""
+                let code = Int(session.getReturnCode()?.getValue() ?? -1)
+                let err  = NSError(
+                    domain: "FFmpegKit",
+                    code: code,
+                    userInfo: [NSLocalizedDescriptionKey: logs]
+                )
+                completion(.failure(err))
+            }
+        }
     }
-
-    func toM4A(input: URL, output: URL) throws {
-        try runFFmpeg([
-            "-y", "-i", input.path,
-            "-codec:a", "aac", "-b:a", "192k",
-            output.path
-        ])
-    }
-
-    func wavToMP3(input: URL, output: URL) throws {
-        try toMP3(input: input, output: output)
-    }
-
-    func mp3ToWAV(input: URL, output: URL) throws {
-        try runFFmpeg([
-            "-y", "-i", input.path,
-            output.path
-        ])
-    }
-
-    /// In‐place metadata tagging for MP3 (and likewise M4A if you want)
+    
+    /// In-place metadata tagging for MP3 (copies streams so no re-encode)
     func tagMP3(
-      file: URL,
-      title: String?,
-      artist: String?,
-      album: String?,
-      year: String?
-    ) throws {
-        // Build -metadata arguments
+        file: URL,
+        title: String?,
+        artist: String?,
+        album: String?,
+        year: String?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        // build -metadata arguments
         var args = ["-y", "-i", file.path]
         if let t = title  { args += ["-metadata", "title=\(t)"] }
         if let a = artist { args += ["-metadata", "artist=\(a)"] }
         if let al = album { args += ["-metadata", "album=\(al)"] }
         if let y = year   { args += ["-metadata", "date=\(y)"] }
-
-        // copy streams so we don't re-encode
+        
+        // copy streams into a temp file
         let tmp = file.deletingPathExtension()
                       .appendingPathExtension("tmp.mp3")
         args += ["-codec", "copy", tmp.path]
-
-        // Run ffmpeg
-        try runFFmpeg(args)
-
-        // Replace original
-        try FileManager.default.removeItem(at: file)
-        try FileManager.default.moveItem(at: tmp, to: file)
+        
+        // run FFmpegKit on the assembled command
+        let cmd = args.map { "\"\($0)\"" }.joined(separator: " ")
+        FFmpegKit.executeAsync(cmd) { session in
+            guard let session = session else {
+                completion(.failure(NSError(domain: "FFmpegKit", code: -1)))
+                return
+            }
+            if session.getReturnCode()?.isValueSuccess() == true {
+                // replace original with tagged
+                do {
+                    try FileManager.default.removeItem(at: file)
+                    try FileManager.default.moveItem(at: tmp, to: file)
+                    completion(.success(()))
+                } catch {
+                    completion(.failure(error))
+                }
+            } else {
+                let logs = session.getAllLogsAsString() ?? ""
+                let code = Int(session.getReturnCode()?.getValue() ?? -1)
+                let err  = NSError(
+                    domain: "FFmpegKit",
+                    code: code,
+                    userInfo: [NSLocalizedDescriptionKey: logs]
+                )
+                completion(.failure(err))
+            }
+        }
     }
 }

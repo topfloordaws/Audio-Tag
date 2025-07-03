@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct Audio_TagApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup {
             ContentView()

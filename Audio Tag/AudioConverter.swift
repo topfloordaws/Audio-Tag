@@ -1,7 +1,8 @@
+//
 // AudioConverter.swift
 // Audio Tag
 //
-//  Created by Dawson Pham on 6/24/25.
+// Created by Dawson Pham on 6/24/25.
 //
 
 import Foundation
@@ -9,7 +10,7 @@ import ffmpegkit
 
 struct AudioConverter {
 
-    /// In-place metadata tagging for MP3 (embedded album art + tags)
+    ///In-place metadata tagging for MP3 (embedded album art + tags)
     func tagMP3(
         file: URL,
         title: String?,

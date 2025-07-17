@@ -1,0 +1,15 @@
+{
+  "originHash" : "fd4f422f308bf29c444ee47e98b74cb6e495fc28239d69937cbe797a1b1b6939",
+  "pins" : [
+    {
+      "identity" : "swift-taglib",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Phisto/swift-taglib",
+      "state" : {
+        "revision" : "3ed517bdfe55eb1b68cfffb920ca7a2452a954df",
+        "version" : "2.0.2"
+      }
+    }
+  ],
+  "version" : 3
+}

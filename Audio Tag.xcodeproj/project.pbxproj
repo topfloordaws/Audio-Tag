@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A878DED02E21DF1400FA3C20 /* TagLib in Frameworks */ = {isa = PBXBuildFile; productRef = A878DECF2E21DF1400FA3C20 /* TagLib */; };
 		A8B6F3972E0E042200FBC864 /* ffmpeg in Resources */ = {isa = PBXBuildFile; fileRef = A8B6F3962E0E042200FBC864 /* ffmpeg */; };
 /* End PBXBuildFile section */
 
@@ -119,6 +120,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A878DED02E21DF1400FA3C20 /* TagLib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,6 +144,7 @@
 		A8032EBA2E0BB5F20022309A = {
 			isa = PBXGroup;
 			children = (
+				A882B2072E21FCF7005C1493 /* TagLibBridge */,
 				A8032F222E0BCFCF0022309A /* Audio Tag */,
 				A8032F202E0BCD960022309A /* Resources */,
 				A8032ED72E0BB5F30022309A /* Audio TagTests */,
@@ -167,6 +170,13 @@
 				A8B6F3962E0E042200FBC864 /* ffmpeg */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A882B2072E21FCF7005C1493 /* TagLibBridge */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = TagLibBridge;
 			sourceTree = "<group>";
 		};
 		A8B6F3452E0DFB7D00FBC864 /* Frameworks */ = {
@@ -198,6 +208,7 @@
 			);
 			name = "Audio Tag";
 			packageProductDependencies = (
+				A878DECF2E21DF1400FA3C20 /* TagLib */,
 			);
 			productName = "Audio Tag";
 			productReference = A8032EC32E0BB5F20022309A /* Audio Tag.app */;
@@ -261,6 +272,7 @@
 				TargetAttributes = {
 					A8032EC22E0BB5F20022309A = {
 						CreatedOnToolsVersion = 16.2;
+						LastSwiftMigration = 1640;
 					};
 					A8032ED32E0BB5F30022309A = {
 						CreatedOnToolsVersion = 16.2;
@@ -282,6 +294,7 @@
 			mainGroup = A8032EBA2E0BB5F20022309A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A878DECE2E21DF1400FA3C20 /* XCRemoteSwiftPackageReference "swift-taglib" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A8032EC42E0BB5F20022309A /* Products */;
@@ -502,6 +515,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++2b";
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "Audio Tag/Audio_Tag.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -553,8 +568,37 @@
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 				);
+				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/.build/checkouts/swift-taglib/Sources/taglib/include";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -564,6 +608,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.daws.Audio-Tag";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Audio Tag/Audio Tag-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -573,6 +619,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++2b";
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "Audio Tag/Audio_Tag.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -624,8 +672,37 @@
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
+					"$(PROJECT_DIR)/Audio\\ Tag/bundle-apple-framework-macos",
 				);
+				GCC_C_LANGUAGE_STANDARD = "compiler-default";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/.build/checkouts/swift-taglib/Sources/taglib/include";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -635,6 +712,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.daws.Audio-Tag";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Audio Tag/Audio Tag-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -743,6 +821,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A878DECE2E21DF1400FA3C20 /* XCRemoteSwiftPackageReference "swift-taglib" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Phisto/swift-taglib";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A878DECF2E21DF1400FA3C20 /* TagLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A878DECE2E21DF1400FA3C20 /* XCRemoteSwiftPackageReference "swift-taglib" */;
+			productName = TagLib;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A8032EBB2E0BB5F20022309A /* Project object */;
 }

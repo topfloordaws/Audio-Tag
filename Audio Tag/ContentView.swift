@@ -1,5 +1,4 @@
 //
-//
 //  ContentView.swift
 //  Audio Tag
 //
@@ -11,375 +10,440 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-// Model for the file and its extracted metadata
 struct FileMetadata: Identifiable, Hashable {
     let url: URL
     var title:        String = ""
     var artist:       String = ""
     var album:        String = ""
-    var yearRecorded: String = ""
+    var albumArtist:  String = ""
     var track:        String = ""
     var genre:        String = ""
-    var albumArtist:  String = ""
+    var yearRecorded: String = ""
+    var comment:      String = ""
     var artwork:      NSImage? = nil
-    var artworkURL:   URL?  = nil
-    var creationDate: Date? = nil
-    var modifiedDate: Date? = nil
-    var accessedDate: Date? = nil
+    var artworkURL:   URL?      = nil
+    
+    // new
+    var dateCreated: Date? = nil
+    var dateModified: Date? = nil
+    //var dateCreated: Date = .distantPast
+    //var dateModified: Date = .distantPast
+
+    
+    var dateCreatedString: String {
+        guard let dateCreated else { return "" }
+        return DateFormatter.localizedString(from: dateCreated, dateStyle: .short, timeStyle: .none)
+    }
+    var dateModifiedString: String {
+        guard let dateModified else { return "" }
+        return DateFormatter.localizedString(from: dateModified, dateStyle: .short, timeStyle: .none)
+    }
 
     var id: URL { url }
 }
 
+// NSImage to JPEG Data helper for artwork copying
+extension NSImage {
+    func toJPEGData(compression: CGFloat = 0.95) -> Data? {
+        guard let tiff = self.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: compression])
+    }
+}
+
 struct ContentView: View {
-    // State
-    @State private var fileItems:    [FileMetadata] = []
-    @State private var selectedIDs:  Set<URL>       = []
-    @State private var status:       String         = ""
-    @State private var isShowingCoverPicker = false
-    @State private var coverTargetURL: URL? = nil
-    // for refresh button
-    @State private var currentFolder: URL?          = nil
-    // for sorting files
-    @State private var sortOrder: [KeyPathComparator<FileMetadata>] = []
+    @State private var fileItems:           [FileMetadata] = []
+    @State private var selectedIDs:         Set<URL>       = []
+    @State private var status:              String         = ""
+    @State private var isShowingCoverPicker                = false
+    @State private var coverTargetURL:      URL?           = nil
+    @State private var currentFolder:       URL?           = nil
+    @State private var copiedTags: FileMetadata?           = nil
+    @State private var sortOrder:           [KeyPathComparator<FileMetadata>] = []
+    // for loading popup
+    @State private var isLoading = false
+    @State private var loadingProgress: Double = 0.0
+    @State private var loadingMessage: String = ""
+    @State private var filesLoaded = 0
+    @State private var filesTotal = 0
+    // for search
+    @State private var searchText: String = ""
+    @State private var isSearching: Bool = false
+    // for output folder saving
+    @State private var outputFolder: URL? = nil
 
     private let tagger    = AudioConverter()
     private let converter = AudioConverter()
+    
+    var filteredItems: [FileMetadata] {
+        if searchText.isEmpty { return fileItems }
+        let q = searchText.lowercased()
+        return fileItems.filter { file in
+            file.url.lastPathComponent.lowercased().contains(q)
+            || file.title.lowercased().contains(q)
+            || file.artist.lowercased().contains(q)
+            || file.album.lowercased().contains(q)
+            || file.albumArtist.lowercased().contains(q)
+        }
+    }
 
     var body: some View {
-        HSplitView {
-            // Left pane: folder picker + editor
-            VStack(alignment: .leading, spacing: 16) {
-                // pick folder (and implicit file group) + refresh
-                HStack {
-                    Button("Browse Folder", action: pickFolder)
+        ZStack {
+            HSplitView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Button("Browse Folder", action: pickFolder)
                         if currentFolder != nil {
-                            Button("Refresh") {
-                                Task {
-                                   await loadFiles(in: currentFolder!)
+                            Button("Refresh") { Task { await loadFiles(in: currentFolder!) } }
+                        }
+                    }
+                    Divider()
+                    if selectedIDs.count == 1, let sel = selectedIDs.first,
+                       let file = fileItems.first(where: { $0.id == sel }) {
+                        metadataEditor(for: file)
+                    } else if selectedIDs.count > 1 {
+                        BatchMetadataEditor(
+                            selected: selectedIDs,
+                            fileItems: $fileItems,
+                            onApply: { status = "Updated \(selectedIDs.count) files." },
+                            applyTags: { file in
+                                applyTags(to: file)
+                            }
+                        )
+                    } else {
+                        Text("Select a file in the table to view/edit its tags.")
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(status).foregroundColor(.secondary)
+                    if isSearching {
+                            HStack {
+                                TextField("Search...", text: $searchText)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .onSubmit { isSearching = false }
+                                    .onExitCommand {
+                                        isSearching = false
+                                        searchText = ""
+                                    }
+                                Button("Cancel") {
+                                    isSearching = false
+                                    searchText = ""
                                 }
+                            }
+                        }
+                    HStack {
+                        Button("→ MP3") {
+                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
+                                convert(url, toExt: "mp3")
+                            }
+                        }
+                        Button("→ M4A") {
+                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
+                                convert(url, toExt: "m4a")
+                            }
+                        }
+                        Button("Set Output Folder") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.allowsMultipleSelection = false
+                            if panel.runModal() == .OK, let url = panel.url {
+                                outputFolder = url
+                            }
+                        }
+                        if let outputFolder = outputFolder {
+                            Text("Saving to: \(outputFolder.path)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
                     }
                 }
-                Divider()
-                // metadata editor for the first selected file
-                if let selURL = selectedIDs.first,
-                   let file   = fileItems.first(where: { $0.id == selURL })
-                {
-                    metadataEditor(for: file)
-                } else {
-                    Text("Select a file in the table to view/edit its tags.")
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Text(status).foregroundColor(.secondary)
+                .padding()
+                .frame(minWidth: 210)
                 
-                Button("→ MP3") {
-                    // convert every selected file to .mp3
-                    for url in fileItems
-                      .filter({ selectedIDs.contains($0.id) })
-                      .map(\.url)
-                    {
-                      convert(url, toExt: "mp3")
-                    }
-                  }
-                Button("→ M4A") {
-                    // convert every selected file to .m4a
-                    for url in fileItems
-                      .filter({ selectedIDs.contains($0.id) })
-                      .map(\.url)
-                    {
-                      convert(url, toExt: "m4a")
-                    }
-                  }
-            }
-            .padding()
-            .frame(minWidth: 210)
+                VStack {
+                    Table(filteredItems, selection: $selectedIDs, sortOrder: $sortOrder) {
+                        TableColumn("Filename", value: \.url.lastPathComponent) { item in
+                            Text(item.url.lastPathComponent)
+                                .contextMenu {
+                                    Button("Copy Tags") {
+                                        // Deep copy artwork as well
+                                        var meta = item
+                                        if let img = item.artwork,
+                                           let data = img.tiffRepresentation,
+                                           let copiedImg = NSImage(data: data)
+                                        {
+                                            meta.artwork = copiedImg
+                                            // Save a deep-copied image to temp and set artworkURL
+                                            let tmpJ = FileManager.default.temporaryDirectory
+                                                .appendingPathComponent(UUID().uuidString)
+                                                .appendingPathExtension("jpg")
+                                            if let jpeg = img.toJPEGData() {
+                                                try? jpeg.write(to: tmpJ)
+                                                meta.artworkURL = tmpJ
+                                            } else {
+                                                meta.artworkURL = nil
+                                            }
+                                        }
+                                        copiedTags = meta
+                                    }
+                                    Button("Paste Tags") {
+                                        if let copied = copiedTags, copied.url != item.url {
+                                            pasteTags(onto: item)
+                                        }
+                                    }
+                                    .disabled(copiedTags == nil || copiedTags?.url == item.url)
+                                }
+                        }
+                            .width(min: 100, ideal: 200, max: 300)
+                        TableColumn("Title",         value: \.title)
+                        TableColumn("Artist",        value: \.artist)
+                        TableColumn("Album",         value: \.album)
+                        TableColumn("Album Artist",  value: \.albumArtist)
+                        TableColumn("Track",         value: \.track)
+                            .width(min: 40, ideal: 52, max: 60)
+                        TableColumn("Genre",         value: \.genre)
+                            .width(min: 60, ideal: 70, max: 80)
+                        TableColumn("Year Recorded", value: \.yearRecorded)
+                            .width(min: 60, ideal: 90, max: 140)
+                        TableColumn("Date Created") { item in
+                            Text(item.dateCreatedString)
+                        }
+                            .width(min: 60, ideal: 80, max: 140)
+                        TableColumn("Date Modified") { item in
+                            Text(item.dateModifiedString)
+                        }
+                            .width(min: 60, ideal: 80, max: 140)
 
-            // Right pane: horizontal metadata table
-            VStack {
-                Table(fileItems, selection: $selectedIDs, sortOrder: $sortOrder) {
-                    TableColumn("Filename",      value: \.url.lastPathComponent)
-                    TableColumn("Title",         value: \.title)
-                    TableColumn("Artist",        value: \.artist)
-                    TableColumn("Album",         value: \.album)
-                    TableColumn("Album Artist",  value: \.albumArtist)
-                    TableColumn("Track",         value: \.track)
-                    TableColumn("Genre",         value: \.genre)
-                    TableColumn("Year Recorded", value: \.yearRecorded)
+                    }
+                    .onChange(of: sortOrder) { fileItems.sort(using: $0) }
+                    .frame(minWidth: 790)
                 }
-                .onChange(of: sortOrder) {
-                  fileItems.sort(using: sortOrder)
+            }
+            .frame(minWidth: 1000, minHeight: 500)
+            .onAppear {
+                NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "f" {
+                        isSearching = true
+                        return nil // Prevents default handling
+                    }
+                    if isSearching && event.keyCode == 53 { // 53 is Escape key
+                        isSearching = false
+                        searchText = ""
+                        return nil
+                    }
+                    return event
                 }
-                .frame(minWidth: 790)
+            }
+            if isLoading {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                VStack(spacing: 10) {
+                    ProgressView("Loading files…")
+                    Text("\(filesLoaded) of \(filesTotal) files")
+                        .foregroundColor(.secondary)
+                        .font(.callout)
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.windowBackgroundColor)))
+                .shadow(radius: 8)
             }
         }
-        .frame(minWidth: 1000, minHeight: 500)
     }
 
-    // Folder picker
+    // MARK: – Folder picker
 
     private func pickFolder() {
         let panel = NSOpenPanel()
-        panel.canChooseFiles       = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes     = [.folder]
+        panel.canChooseFiles           = false
+        panel.canChooseDirectories     = true
+        panel.allowsMultipleSelection  = false
+        panel.allowedContentTypes      = [.folder]
         if panel.runModal() == .OK, let url = panel.url {
             currentFolder = url
             Task { await loadFiles(in: url) }
         }
     }
 
-    // Load files & extract metadata
+    // MARK: – Load files & extract metadata
 
     private func loadFiles(in folder: URL) async {
-        // Gatherx all .mp3, .m4a, and .wav files in the folder
-        let audioExts = ["mp3","m4a","wav"]
+        let exts = ["mp3","m4a","wav"]
         let urls = (try? FileManager.default
             .contentsOfDirectory(at: folder,
-                includingPropertiesForKeys: nil,
-                options: .skipsHiddenFiles)
-            .filter { audioExts.contains($0.pathExtension.lowercased()) }
+                                 includingPropertiesForKeys: nil,
+                                 options: .skipsHiddenFiles)
+            .filter { exts.contains($0.pathExtension.lowercased()) }
         ) ?? []
 
-        // Seed model
-        let items = urls.map { FileMetadata(url: $0) }
-
-
-        // Publish preliminary list
+        var items: [FileMetadata] = urls.map { FileMetadata(url: $0) }
+        let total = items.count
+        
         await MainActor.run {
-            self.fileItems   = items
-            self.selectedIDs = []
-            self.status      = "Found \(items.count) files"
+            isLoading = true
+            loadingProgress = 0
+            loadingMessage = "Loading files..."
+            //filesLoaded = 0
+            filesTotal = urls.count
         }
 
-        // Load metadata for each file
+        // Read metadata for each file
         for idx in items.indices {
             let url = items[idx].url
+            let resourceKeys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
+            let resourceValues = try? url.resourceValues(forKeys: Set(resourceKeys))
+            items[idx].dateCreated = resourceValues?.creationDate
+            items[idx].dateModified = resourceValues?.contentModificationDate
 
-                // 2a) grab fs dates:
-                if let rv = try? url.resourceValues(
-                     forKeys: [.creationDateKey,
-                               .contentModificationDateKey,
-                               .contentAccessDateKey])
-                {
-                    await MainActor.run {
-                        self.fileItems[idx].creationDate = rv.creationDate
-                        self.fileItems[idx].modifiedDate = rv.contentModificationDate
-                        self.fileItems[idx].accessedDate = rv.contentAccessDate
-                    }
-                }
-            
-            let asset = AVURLAsset(url: items[idx].url)
+            let ext = url.pathExtension.lowercased()
 
-            // common tags and artwork
-            if let common = try? await asset.load(.commonMetadata) {
-                if let t = common.first(where: { $0.commonKey == .commonKeyTitle }),
-                   let s = try? await t.load(.stringValue) {
-                    await MainActor.run { self.fileItems[idx].title = s }
-                }
-                if let a = common.first(where: { $0.commonKey == .commonKeyArtist }),
-                   let s = try? await a.load(.stringValue) {
-                    await MainActor.run { self.fileItems[idx].artist = s }
-                }
-                if let al = common.first(where: { $0.commonKey == .commonKeyAlbumName }),
-                   let s = try? await al.load(.stringValue) {
-                    await MainActor.run { self.fileItems[idx].album = s }
-                }
-                
-                
-                if let art = common.first(where: { $0.commonKey == .commonKeyArtwork }),
-                   let rawData = try? await art.load(.dataValue),
-                   let nsImage = NSImage(data: rawData)
-                {
-                    // display in-memory
-                    await MainActor.run {
-                        self.fileItems[idx].artwork = nsImage
-                    }
+            if ext == "mp3" {
+                // Use TagLib/MP3Tagger for all fields except artwork
+                items[idx].title        = MP3Tagger.readTitle(path: url.path)
+                items[idx].artist       = MP3Tagger.readArtist(path: url.path)
+                items[idx].album        = MP3Tagger.readAlbum(path: url.path)
+                items[idx].albumArtist  = MP3Tagger.readAlbumArtist(path: url.path)
+                let trackNum            = MP3Tagger.readTrack(path: url.path)
+                items[idx].track        = trackNum > 0 ? "\(trackNum)" : ""
+                items[idx].genre        = MP3Tagger.readGenre(path: url.path)
+                let yearNum             = MP3Tagger.readYear(path: url.path)
+                items[idx].yearRecorded = yearNum > 0 ? "\(yearNum)" : ""
+                items[idx].comment      = MP3Tagger.readComment(path: url.path)
 
-                    // write same `rawData` to disk while still in scope
-                    let tmp = FileManager.default
-                        .temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString)
-                        .appendingPathExtension("jpg")
-                    do {
-                        try rawData.write(to: tmp)
-                        await MainActor.run {
-                            self.fileItems[idx].artworkURL = tmp
-                        }
-                    } catch {
-                        print("couldn’t write cover-art:", error)
-                    }
-                }
-
-                
-                if fileItems[idx].yearRecorded.isEmpty,
-                   let cd = common.first(where: { $0.commonKey == .commonKeyCreationDate }),
-                   let raw = try? await cd.load(.stringValue)
-                    
-                {
-                    let yearOnly = String(raw.prefix(4))
-                    await MainActor.run {
-                        self.fileItems[idx].yearRecorded = yearOnly
-                    }
-                }
-                if self.fileItems[idx].yearRecorded.isEmpty {
-                    if let mp4Items = try? await asset.loadMetadata(for: .iTunesMetadata),
-                       let rd = mp4Items.first(where: { $0.identifier == .iTunesMetadataReleaseDate }),
-                       let raw = try? await rd.load(.stringValue)
+                // Still use AVAsset for artwork only
+                let asset = AVURLAsset(url: url)
+                if let common = try? await asset.load(.commonMetadata) {
+                    if let it = common.first(where: { $0.commonKey == .commonKeyArtwork }),
+                       let d  = try? await it.load(.dataValue),
+                       let i  = NSImage(data: d)
                     {
-                        let yearOnly = String(raw.prefix(4))
-                        await MainActor.run {
-                            self.fileItems[idx].yearRecorded = yearOnly
+                        items[idx].artwork = i
+                        if let jpeg = i.toJPEGData() {
+                            let tmpJ = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(UUID().uuidString)
+                                .appendingPathExtension("jpg")
+                            try? jpeg.write(to: tmpJ)
+                            items[idx].artworkURL = tmpJ
+                        }
+                    }
+                }
+            } else {
+                // m4a, wav, etc. - use AVAsset as before
+                let asset = AVURLAsset(url: url)
+                if let common = try? await asset.load(.commonMetadata) {
+                    if let it = common.first(where: { $0.commonKey == .commonKeyTitle }),
+                       let s  = try? await it.load(.stringValue) {
+                        items[idx].title = s
+                    }
+                    if let it = common.first(where: { $0.commonKey == .commonKeyArtist }),
+                       let s  = try? await it.load(.stringValue) {
+                        items[idx].artist = s
+                    }
+                    if let it = common.first(where: { $0.commonKey == .commonKeyAlbumName }),
+                       let s  = try? await it.load(.stringValue) {
+                        items[idx].album = s
+                    }
+                    if let it = common.first(where: { $0.commonKey == .commonKeyArtwork }),
+                       let d  = try? await it.load(.dataValue),
+                       let i  = NSImage(data: d)
+                    {
+                        items[idx].artwork = i
+                        if let jpeg = i.toJPEGData() {
+                            let tmpJ = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(UUID().uuidString)
+                                .appendingPathExtension("jpg")
+                            try? jpeg.write(to: tmpJ)
+                            items[idx].artworkURL = tmpJ
                         }
                     }
                 }
             }
-
-            // ID3 frames for “Year Recorded” (TDRC), track & genre & album artist (TPE2)
-            if let id3Items = try? await asset.loadMetadata(for: .id3Metadata) {
-                // Year Recorded (TDRC)
-                if let rc = id3Items.first(where: { $0.identifier == .id3MetadataRecordingTime }),
-                   let raw = try? await rc.load(.stringValue)
-                {
-                    let yearOnly = String(raw.prefix(4))
-                    await MainActor.run { self.fileItems[idx].yearRecorded = yearOnly }
-                }
-                // Year Recorded "TYLER" frame
-                if self.fileItems[idx].yearRecorded.isEmpty,
-                    let y2 = id3Items.first(where: { $0.identifier == .id3MetadataYear }),
-                    let raw2 = try? await y2.load(.stringValue)
-                {
-                    let yearOnly2 = String(raw2.prefix(4))
-                    await MainActor.run { self.fileItems[idx].yearRecorded = yearOnly2 }
-                }
-
-                // Track number
-                if let tn = id3Items.first(where: { $0.identifier == .id3MetadataTrackNumber }),
-                   let s  = try? await tn.load(.stringValue)
-                {
-                    await MainActor.run { self.fileItems[idx].track = s }
-                }
-
-                // Genre
-                if let gr = id3Items.first(where: { $0.identifier == .id3MetadataContentType }),
-                   let s  = try? await gr.load(.stringValue)
-                {
-                    await MainActor.run { self.fileItems[idx].genre = s }
-                }
-
-                // Album Artist (TPE2 frame via ID3)
-                let tpe2Items = AVMetadataItem.metadataItems(
-                    from: id3Items,
-                    withKey: "TPE2",
-                    keySpace: .id3
-                )
-                if let aaItem = tpe2Items.first,
-                   let aa = try? await aaItem.load(.stringValue) {
-                    await MainActor.run {
-                        self.fileItems[idx].albumArtist = aa
-                    }
-                }
+            let progress = Double(idx + 1) / Double(total)
+            await MainActor.run {
+                loadingProgress = progress
+                filesLoaded = idx + 1
             }
+        }
+
+        await MainActor.run {
+            fileItems   = items
+            selectedIDs = []
+            status      = "Found \(urls.count) files"
+            isLoading = false
+            loadingProgress = 0
+            loadingMessage = ""
         }
     }
 
-    // Metadata editor UI
+    // MARK: – Metadata editor UI
 
     @ViewBuilder
     private func metadataEditor(for file: FileMetadata) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Title")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.title, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Title")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.title,        in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Artist")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.artist, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Artist")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.artist,       in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Album")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.album, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Album")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.album,        in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Album Artist")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.albumArtist, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Album Artist")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.albumArtist,  in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-           // TextField("Artist",      text: binding(for: \.artist,       in: file))
-          //  TextField("Album",       text: binding(for: \.album,        in: file))
-           // TextField("Album Artist",text: binding(for: \.albumArtist, in: file))
-            
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Track Number")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.track, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Track")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.track,        in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Year Recorded")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.yearRecorded, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Genre")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.genre,        in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            /*
-            HStack {
-                TextField("Track",        text: binding(for: \.track,        in: file))
-                    .frame(width: 60)
-                TextField("Year Recorded",text: binding(for: \.yearRecorded,in: file))
-                    .frame(width: 80)
+            Group {
+                Text("Year")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.yearRecorded, in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            */
-            
-            VStack(alignment: .leading, spacing: 4) {
-              Text("Genre")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.leading, 4)
-              TextField("", text: binding(for: \.genre, in: file))
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            Group {
+                Text("Comment")
+                    .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("", text: binding(for: \.comment, in: file))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            
             if let img = file.artwork {
-                HStack {
-                    Spacer()
-                    Image(nsImage: img)
-                      .resizable()
-                      .scaledToFit()
-                      .frame(maxWidth: .infinity, maxHeight: 200)
-                }
-                .padding(.vertical, 8)
+                Image(nsImage: img)
+                    .resizable().scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .padding(.vertical, 8)
             }
-            
-            HStack{
+            HStack {
                 Spacer()
                 Button("Change Cover") {
-                    coverTargetURL = file.url
+                    coverTargetURL       = file.url
                     isShowingCoverPicker = true
                 }
                 Spacer()
             }
-            
             HStack {
                 Spacer()
                 Button("Apply Tags") { applyTags(to: file) }
@@ -388,98 +452,340 @@ struct ContentView: View {
         }
         .padding(.top, 16)
         .fileImporter(
-              isPresented: $isShowingCoverPicker,
-              allowedContentTypes: [.image],
-              allowsMultipleSelection: false
-            ) { result in
-              guard
-                case .success(let urls) = result,
-                let picked = urls.first,
-                let idx = fileItems.firstIndex(where: { $0.url == coverTargetURL })
-              else { return }
-
-              // update both artwork & artworkURL
-              if let ns = NSImage(contentsOf: picked) {
-                fileItems[idx].artwork = ns
+            isPresented: $isShowingCoverPicker,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result,
+                  let picked = urls.first,
+                  let idx    = fileItems.firstIndex(where: { $0.url == coverTargetURL })
+            else { return }
+            if let ns = NSImage(contentsOf: picked) {
+                fileItems[idx].artwork    = ns
                 fileItems[idx].artworkURL = picked
-              }
             }
+        }
     }
 
-    // Two-way binding into `fileItems`
+    // MARK: – Two-way binding helper
+
     private func binding<Value>(
-        for keyPath: WritableKeyPath<FileMetadata,Value>,
+        for keyPath: WritableKeyPath<FileMetadata, Value>,
         in element: FileMetadata
     ) -> Binding<Value> {
         guard let idx = fileItems.firstIndex(of: element) else {
             return .constant(element[keyPath: keyPath])
         }
         return Binding(
-            get: { fileItems[idx][keyPath: keyPath] },
-            set: { fileItems[idx][keyPath: keyPath] = $0 }
+            get:  { fileItems[idx][keyPath: keyPath] },
+            set:  { fileItems[idx][keyPath: keyPath] = $0 }
         )
     }
 
-    // Tagging
+    // MARK: – Tag dispatch
 
     private func applyTags(to file: FileMetadata) {
-      status = "Tagging"
-      tagger.tagMP3(
-        file:         file.url,
-        title:        file.title.isEmpty       ? nil : file.title,
-        artist:       file.artist.isEmpty      ? nil : file.artist,
-        album:        file.album.isEmpty       ? nil : file.album,
-        year:         file.yearRecorded.isEmpty ? nil : file.yearRecorded,  //  fixed
-        albumArtist:  file.albumArtist.isEmpty ? nil : file.albumArtist,
-        trackNumber:  file.track.isEmpty       ? nil : file.track,
-        genre:        file.genre.isEmpty       ? nil : file.genre,
-        coverArt:     file.artworkURL
-      ) { result in
-        DispatchQueue.main.async {
-          self.status = result.isSuccess
-            ? "Tags updated"
-            : "\(result.error!.localizedDescription)"
-        }
-      }
-    }
+        status = "Tagging…"
+        let ext = file.url.pathExtension.lowercased()
 
-    // call your AudioConverter under the hood
-    private func convert(_ url: URL, toExt ext: String) {
-        let out = url.deletingPathExtension()
-            .appendingPathExtension(ext)
-        status = "⏳ Converting…"
+        guard let idx = fileItems.firstIndex(where: { $0.url == file.url }) else { return }
+        let current = fileItems[idx]
+
         switch ext {
         case "mp3":
-            converter.toMP3(input: url, output: out) { result in
-                DispatchQueue.main.async {
-                    status = result.isSuccess
-                    ? "✅ Saved \(out.lastPathComponent)"
-                    : "❌ Conv. error: \(result.error!.localizedDescription)"
-                }
-            }
+            let coverData = current.artworkURL.flatMap { try? Data(contentsOf: $0) }
+            let coverMime: String? = {
+                guard let url = current.artworkURL else { return nil }
+                return url.pathExtension.lowercased() == "png"
+                    ? "image/png" : "image/jpeg"
+            }()
+            let success = MP3Tagger.updateTags(
+                path:        current.url.path,
+                title:       current.title.isEmpty        ? nil : current.title,
+                artist:      current.artist.isEmpty       ? nil : current.artist,
+                album:       current.album.isEmpty        ? nil : current.album,
+                albumArtist: current.albumArtist.isEmpty  ? nil : current.albumArtist,
+                track:       Int(current.track),
+                year:        Int(current.yearRecorded),
+                genre:       current.genre.isEmpty        ? nil : current.genre,
+                comment:     current.comment.isEmpty      ? nil : current.comment,
+                coverData:   coverData,
+                coverMime:   coverData != nil ? coverMime : nil
+            )
+            status = success ? "Tags updated" : "Error: Tag update failed"
+
         case "m4a":
-            converter.toM4A(input: url, output: out) { result in
+            tagger.tagM4A(
+                file:        file.url,
+                title:       current.title.isEmpty        ? nil : current.title,
+                artist:      current.artist.isEmpty       ? nil : current.artist,
+                album:       current.album.isEmpty        ? nil : current.album,
+                year:        current.yearRecorded.isEmpty ? nil : current.yearRecorded,
+                albumArtist: current.albumArtist.isEmpty  ? nil : current.albumArtist,
+                trackNumber: current.track.isEmpty        ? nil : current.track,
+                genre:       current.genre.isEmpty        ? nil : current.genre,
+                coverArt:    current.artworkURL
+            ) { result in
                 DispatchQueue.main.async {
-                    status = result.isSuccess
-                    ? "✅ Saved \(out.lastPathComponent)"
-                    : "❌ Conv. error: \(result.error!.localizedDescription)"
+                    switch result {
+                    case .success:
+                        status = "Tags updated"
+                    case .failure(let err):
+                        status = "Error: \(err.localizedDescription)"
+                    }
                 }
             }
+
+        case "wav":
+            tagger.tagWAV(
+                file:        file.url,
+                title:       current.title.isEmpty        ? nil : current.title,
+                artist:      current.artist.isEmpty       ? nil : current.artist,
+                album:       current.album.isEmpty        ? nil : current.album,
+                year:        current.yearRecorded.isEmpty ? nil : current.yearRecorded,
+                albumArtist: current.albumArtist.isEmpty  ? nil : current.albumArtist,
+                trackNumber: current.track.isEmpty        ? nil : current.track,
+                genre:       current.genre.isEmpty        ? nil : current.genre
+            ) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        status = "Tags updated"
+                    case .failure(let err):
+                        status = "Error: \(err.localizedDescription)"
+                    }
+                }
+            }
+
         default:
-        break
+            status = "Unsupported file type: \(ext.uppercased())"
+        }
+    }
+
+    private func pasteTags(onto target: FileMetadata) {
+        guard let idx = fileItems.firstIndex(where: { $0.url == target.url }),
+              let source = copiedTags
+        else { return }
+
+        // Only copy actual tag fields, not URLs or dates
+        fileItems[idx].title        = source.title
+        fileItems[idx].artist       = source.artist
+        fileItems[idx].album        = source.album
+        fileItems[idx].albumArtist  = source.albumArtist
+        fileItems[idx].track        = source.track
+        fileItems[idx].genre        = source.genre
+        fileItems[idx].yearRecorded = source.yearRecorded
+
+        // Deep copy artwork
+        if let img = source.artwork,
+           let data = img.tiffRepresentation,
+           let copiedImg = NSImage(data: data)
+        {
+            fileItems[idx].artwork = copiedImg
+            let tmpJ = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("jpg")
+            if let jpeg = img.toJPEGData() {
+                try? jpeg.write(to: tmpJ)
+                fileItems[idx].artworkURL = tmpJ
+            } else {
+                fileItems[idx].artworkURL = nil
+            }
+        } else {
+            fileItems[idx].artwork = nil
+            fileItems[idx].artworkURL = nil
+        }
+
+        // Optionally, select the target file so that the sidebar shows its tags
+        selectedIDs = [target.url]
+    }
+
+    // MARK: – Conversion dispatch
+
+    private func convert(_ url: URL, toExt ext: String) {
+        let out: URL
+        if let folder = outputFolder {
+            out = folder.appendingPathComponent(url.deletingPathExtension().lastPathComponent)
+                        .appendingPathExtension(ext)
+        } else {
+            out = url.deletingPathExtension().appendingPathExtension(ext)
+        }
+        status = "⏳ Converting"
+        switch (url.pathExtension.lowercased(), ext) {
+        case ("wav", "mp3"):
+            converter.toMP3(input: url, output: out) { res in
+                DispatchQueue.main.async {
+                    switch res {
+                    case .success:
+                        status = "Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "Conversion error: \(err.localizedDescription)"
+                    }
+                }
+            }
+            
+        case ("m4a", "mp3"):
+            converter.m4aToMP3WithJPEGCover(inputM4A: url, outputMP3: out) { res in
+                DispatchQueue.main.async {
+                    switch res {
+                    case .success:
+                        status = "Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "Conversion error: \(err.localizedDescription)"
+                    }
+                }
+            }
+
+        case ("mp3", "mp3"):
+            converter.toMP3(input: url, output: out) { res in
+                DispatchQueue.main.async {
+                    switch res {
+                    case .success:
+                        status = "Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "Conversion error: \(err.localizedDescription)"
+                    }
+                }
+            }
+
+        case ("m4a", "m4a"):
+            converter.toM4A(input: url, output: out) { res in
+                DispatchQueue.main.async {
+                    switch res {
+                    case .success:
+                        status = "Saved \(out.lastPathComponent)"
+                    case .failure(let err):
+                        status = "Conversion error: \(err.localizedDescription)"
+                    }
+                }
+            }
+
+        default:
+            break
         }
     }
 }
 
-// convenience helpers on Result
-private extension Result {
-    var isSuccess: Bool {
-        if case .success = self { return true }
-        return false
+// MARK: – Batch Editor (now calls applyTags for each file!)
+struct BatchMetadataEditor: View {
+    let selected: Set<URL>
+    @Binding var fileItems: [FileMetadata]
+    var onApply: () -> Void
+    var applyTags: (FileMetadata) -> Void
+
+    @State private var title: String = ""
+    @State private var artist: String = ""
+    @State private var album: String = ""
+    @State private var albumArtist: String = ""
+    @State private var track: String = ""
+    @State private var genre: String = ""
+    @State private var yearRecorded: String = ""
+    @State private var artwork: NSImage? = nil
+    @State private var showCoverPicker = false
+    @State private var comment: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Editing \(selected.count) files").font(.headline)
+            Group {
+                Text("Title").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $title)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Artist").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $artist)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Album").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $album)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Album Artist").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $albumArtist)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Track").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $track)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Genre").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $genre)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Year").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $yearRecorded)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            Group {
+                Text("Comment").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
+                TextField("Leave blank to skip", text: $comment)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+            }
+            if let img = artwork {
+                Image(nsImage: img)
+                    .resizable().scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 200)
+                    .padding(.vertical, 8)
+            }
+            HStack {
+                Spacer()
+                Button("Change Cover") { showCoverPicker = true }
+                Spacer()
+            }
+            HStack {
+                Spacer()
+                Button("Apply to All") {
+                    applyBatchTags()
+                    onApply()
+                }
+                Spacer()
+            }
+        }
+        .padding(.top, 16)
+        .fileImporter(
+            isPresented: $showCoverPicker,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result,
+                  let picked = urls.first,
+                  let ns = NSImage(contentsOf: picked)
+            else { return }
+            artwork = ns
+        }
     }
-    var error: Error? {
-        if case .failure(let e) = self { return e }
-        return nil
+
+    private func applyBatchTags() {
+        for url in selected {
+            if let idx = fileItems.firstIndex(where: { $0.url == url }) {
+                if !title.isEmpty        { fileItems[idx].title        = title }
+                if !artist.isEmpty       { fileItems[idx].artist       = artist }
+                if !album.isEmpty        { fileItems[idx].album        = album }
+                if !albumArtist.isEmpty  { fileItems[idx].albumArtist  = albumArtist }
+                if !track.isEmpty        { fileItems[idx].track        = track }
+                if !genre.isEmpty        { fileItems[idx].genre        = genre }
+                if !yearRecorded.isEmpty { fileItems[idx].yearRecorded = yearRecorded }
+                if !comment.isEmpty      { fileItems[idx].comment      = comment }
+                if let img = artwork     {
+                    fileItems[idx].artwork = img
+                    let tmpJ = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension("jpg")
+                    if let jpeg = img.toJPEGData() {
+                        try? jpeg.write(to: tmpJ)
+                        fileItems[idx].artworkURL = tmpJ
+                    }
+                }
+                // Actually persist the tag changes to disk for each file!
+                applyTags(fileItems[idx])
+            }
+        }
     }
 }
 

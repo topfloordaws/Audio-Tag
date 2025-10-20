@@ -22,6 +22,8 @@ struct FileMetadata: Identifiable, Hashable {
     var comment:      String = ""
     var artwork:      NSImage? = nil
     var artworkURL:   URL?      = nil
+    var artworkData: Data? = nil
+    var artworkMime: String? = nil
     
     // new
     var dateCreated: Date? = nil
@@ -71,6 +73,12 @@ struct ContentView: View {
     @State private var isSearching: Bool = false
     // for output folder saving
     @State private var outputFolder: URL? = nil
+    // for audio playback
+    @State private var player: AVPlayer? = nil
+    @State private var isPlaying: Bool = false
+    @State private var duration: Double = 0     // seconds
+    @State private var currentTime: Double = 0  // seconds
+    @State private var isUserSeeking = false    // disables timer update during user drag
 
     private let tagger    = AudioConverter()
     private let converter = AudioConverter()
@@ -116,6 +124,7 @@ struct ContentView: View {
                     }
                     Spacer()
                     Text(status).foregroundColor(.secondary)
+
                     if isSearching {
                             HStack {
                                 TextField("Search...", text: $searchText)
@@ -218,7 +227,9 @@ struct ContentView: View {
                             .width(min: 60, ideal: 80, max: 140)
 
                     }
-                    .onChange(of: sortOrder) { fileItems.sort(using: $0) }
+                    .onChange(of: sortOrder) { _, newValue in
+                        fileItems.sort(using: newValue)
+                    }
                     .frame(minWidth: 790)
                 }
             }
@@ -385,37 +396,37 @@ struct ContentView: View {
             Group {
                 Text("Title")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.title,        in: file))
+                TextField("", text: binding(for: \.title, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
                 Text("Artist")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.artist,       in: file))
+                TextField("", text: binding(for: \.artist, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
                 Text("Album")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.album,        in: file))
+                TextField("", text: binding(for: \.album, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
                 Text("Album Artist")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.albumArtist,  in: file))
+                TextField("", text: binding(for: \.albumArtist, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
                 Text("Track")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.track,        in: file))
+                TextField("", text: binding(for: \.track, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
                 Text("Genre")
                     .font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("", text: binding(for: \.genre,        in: file))
+                TextField("", text: binding(for: \.genre, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
             Group {
@@ -432,14 +443,16 @@ struct ContentView: View {
             }
             if let img = file.artwork {
                 Image(nsImage: img)
-                    .resizable().scaledToFit()
+                    .resizable()
+                    .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: 200)
                     .padding(.vertical, 8)
             }
+
             HStack {
                 Spacer()
                 Button("Change Cover") {
-                    coverTargetURL       = file.url
+                    coverTargetURL = file.url
                     isShowingCoverPicker = true
                 }
                 Spacer()
@@ -449,25 +462,117 @@ struct ContentView: View {
                 Button("Apply Tags") { applyTags(to: file) }
                 Spacer()
             }
+
+            Spacer()
+            
+            // AUDIO PLAYER UI
+            let audioURL = file.url
+            HStack {
+                Button(action: {
+                    if isPlaying {
+                        player?.pause()
+                    } else {
+                        if player == nil || (player?.currentItem?.asset as? AVURLAsset)?.url != audioURL {
+                            player = AVPlayer(url: audioURL)
+                            if let item = player?.currentItem {
+                                Task {
+                                    // Loads the duration asynchronously, modern syntax (macOS 13+)
+                                    let durationSeconds = try? await item.asset.load(.duration).seconds
+                                    await MainActor.run {
+                                        duration = durationSeconds ?? 0
+                                    }
+                                }
+                            }
+                        }
+                        player?.play()
+                    }
+                    isPlaying.toggle()
+                }) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title)
+                }
+                .buttonStyle(.plain)
+                Button(action: {
+                    player?.pause()
+                    player = nil
+                    isPlaying = false
+                    currentTime = 0
+                }) {
+                    Image(systemName: "stop.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Progress/Seek Bar
+            Slider(value: Binding(
+                get: { currentTime },
+                set: { newValue in
+                    isUserSeeking = true
+                    currentTime = newValue
+                }
+            ), in: 0...max(duration, 1), onEditingChanged: { editing in
+                if !editing, let player = player {
+                    let seekTime = CMTime(seconds: currentTime, preferredTimescale: 600)
+                    player.seek(to: seekTime)
+                    isUserSeeking = false
+                }
+            })
+            .accentColor(.blue)
+            .disabled(duration == 0)
+            
+            HStack {
+                Text(timeString(currentTime)).font(.caption.monospacedDigit())
+                Spacer()
+                Text(timeString(duration)).font(.caption.monospacedDigit())
+            }
+
         }
         .padding(.top, 16)
-        .fileImporter(
-            isPresented: $isShowingCoverPicker,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
+        .fileImporter(isPresented: $isShowingCoverPicker,
+                      allowedContentTypes: [.image],
+                      allowsMultipleSelection: false) { result in
             guard case .success(let urls) = result,
                   let picked = urls.first,
-                  let idx    = fileItems.firstIndex(where: { $0.url == coverTargetURL })
+                  let idx = fileItems.firstIndex(where: { $0.url == coverTargetURL })
             else { return }
-            if let ns = NSImage(contentsOf: picked) {
-                fileItems[idx].artwork    = ns
-                fileItems[idx].artworkURL = picked
+
+            // Read bytes immediately (inside the sandboxed access window)
+            if let data = try? Data(contentsOf: picked),
+               let img  = NSImage(data: data) {
+
+                fileItems[idx].artwork     = img
+                fileItems[idx].artworkData = data
+                let ext = picked.pathExtension.lowercased()
+                fileItems[idx].artworkMime = (ext == "png") ? "image/png" : "image/jpeg"
             }
         }
+        // Periodically update the current playback time, but don't update during slider drag
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+            if let player = player, !isUserSeeking {
+                currentTime = player.currentTime().seconds
+            }
+        }
+        // Reset state when selected file changes (NEW macOS 14+ syntax)
+        .onChange(of: file.url) {
+            player?.pause()
+            player = nil
+            isPlaying = false
+            currentTime = 0
+            duration = 0
+        }
+    }
+    
+    // Helper for time formatting
+    private func timeString(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "--:--" }
+        let sec = Int(seconds)
+        let min = sec / 60
+        let rem = sec % 60
+        return String(format: "%d:%02d", min, rem)
     }
 
-    // MARK: – Two-way binding helper
+    // Two Way Binding Helper
 
     private func binding<Value>(
         for keyPath: WritableKeyPath<FileMetadata, Value>,
@@ -482,7 +587,7 @@ struct ContentView: View {
         )
     }
 
-    // MARK: – Tag dispatch
+    // Tag Dispatch
 
     private func applyTags(to file: FileMetadata) {
         status = "Tagging…"
@@ -509,8 +614,8 @@ struct ContentView: View {
                 year:        Int(current.yearRecorded),
                 genre:       current.genre.isEmpty        ? nil : current.genre,
                 comment:     current.comment.isEmpty      ? nil : current.comment,
-                coverData:   coverData,
-                coverMime:   coverData != nil ? coverMime : nil
+                coverData:   current.artworkData,
+                coverMime:   current.artworkData != nil ? (current.artworkMime ?? "image/png") : nil
             )
             status = success ? "Tags updated" : "Error: Tag update failed"
 
@@ -596,12 +701,11 @@ struct ContentView: View {
             fileItems[idx].artworkURL = nil
         }
 
-        // Optionally, select the target file so that the sidebar shows its tags
+        // Optionally, selects the target file so that the sidebar shows its tags
         selectedIDs = [target.url]
     }
 
-    // MARK: – Conversion dispatch
-
+    // Conversion Dispatch
     private func convert(_ url: URL, toExt ext: String) {
         let out: URL
         if let folder = outputFolder {
@@ -613,7 +717,7 @@ struct ContentView: View {
         status = "⏳ Converting"
         switch (url.pathExtension.lowercased(), ext) {
         case ("wav", "mp3"):
-            converter.toMP3(input: url, output: out) { res in
+            converter.robustM4AToMP3(input: url, output: out) { res in
                 DispatchQueue.main.async {
                     switch res {
                     case .success:
@@ -625,7 +729,7 @@ struct ContentView: View {
             }
             
         case ("m4a", "mp3"):
-            converter.m4aToMP3WithJPEGCover(inputM4A: url, outputMP3: out) { res in
+            converter.robustM4AToMP3(input: url, output: out) { res in
                 DispatchQueue.main.async {
                     switch res {
                     case .success:
@@ -637,7 +741,7 @@ struct ContentView: View {
             }
 
         case ("mp3", "mp3"):
-            converter.toMP3(input: url, output: out) { res in
+            converter.robustM4AToMP3(input: url, output: out) { res in
                 DispatchQueue.main.async {
                     switch res {
                     case .success:
@@ -666,7 +770,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: – Batch Editor (now calls applyTags for each file!)
+// Calls Apply Tags for each file
 struct BatchMetadataEditor: View {
     let selected: Set<URL>
     @Binding var fileItems: [FileMetadata]

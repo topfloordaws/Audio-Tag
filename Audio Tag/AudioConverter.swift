@@ -80,7 +80,8 @@ struct AudioConverter {
             }
         }
     }
-
+    
+    /*
     // Converts any audio file (WAV and M4A) → MP3 (libmp3lame VBR quality 2)
     func toMP3(
         input: URL,
@@ -90,6 +91,7 @@ struct AudioConverter {
         // preserves best quality to MP3
         let cmd = """
         -y -i '\(input.path)' \
+        -map 0:a -vn \
         -codec:a libmp3lame -b:a 320k \
         '\(output.path)'
         """
@@ -108,6 +110,40 @@ struct AudioConverter {
                     userInfo: [NSLocalizedDescriptionKey: logs]
                 )
                 completion(.failure(err))
+            }
+        }
+    }
+    */
+    
+    func robustM4AToMP3(
+        input: URL,
+        output: URL,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let cmd = """
+        -y -i '\(input.path)' -map 0:a -map 0:v? \
+        -codec:a libmp3lame -q:a 2 \
+        -c:v copy \
+        -disposition:v attached_pic \
+        -id3v2_version 3 \
+        '\(output.path)'
+        """
+        FFmpegKit.executeAsync(cmd) { session in
+            guard let session = session,
+                  session.getReturnCode()?.isValueSuccess() == true
+            else {
+                let logs = session?.getAllLogsAsString() ?? "conversion failed"
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(
+                        domain: "FFmpegKit",
+                        code: Int(session?.getReturnCode()?.getValue() ?? -1),
+                        userInfo: [NSLocalizedDescriptionKey: logs]
+                    )))
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                completion(.success(()))
             }
         }
     }
@@ -142,6 +178,7 @@ struct AudioConverter {
         }
     }
 
+    /*
     // Converts an M4A ➔ MP3 with PNG→JPEG conversion for embedded art
     func m4aToMP3WithJPEGCover(
         inputM4A: URL,
@@ -210,7 +247,8 @@ struct AudioConverter {
             }
         }
     }
-
+     */
+    
     // In-place metadata tagging for M4A
     func tagM4A(
         file: URL,

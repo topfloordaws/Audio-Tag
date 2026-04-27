@@ -12,11 +12,11 @@ let package = Package(
     targets: [
         .target(
             name: "TagLib",
-            // C++17 for TagLib
+            // C++20 for TagLib to support std::u8string
             cxxSettings: [
-                .unsafeFlags(["-std=gnu++17"])
+                .unsafeFlags(["-std=gnu++20"])
             ],
-            // (Optional) Only needed if a Swift target in this package
+            // Only needed if a Swift target in this package
             // or a consumer uses C++ interop.
             swiftSettings: [
                 .interoperabilityMode(.Cxx)
@@ -24,5 +24,5 @@ let package = Package(
         ),
     ],
     // Global default for this package’s C++ targets
-    cxxLanguageStandard: .gnucxx17
+    cxxLanguageStandard: .gnucxx20
 )

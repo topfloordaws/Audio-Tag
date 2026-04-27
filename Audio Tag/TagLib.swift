@@ -72,24 +72,12 @@ class MP3Tagger {
         }
     }
 
-    // MARK: - Reading
-
-    static func readTitle(path: String) -> String       { readCString(path: path) { TLReadTitle($0) } }
-    static func readArtist(path: String) -> String      { readCString(path: path) { TLReadArtist($0) } }
-    static func readAlbum(path: String) -> String       { readCString(path: path) { TLReadAlbum($0) } }
-    static func readAlbumArtist(path: String) -> String { readCString(path: path) { TLReadAlbumArtist($0) } }
-    static func readTrack(path: String) -> Int          { Int(TLReadTrack(path)) }
-    static func readGenre(path: String) -> String       { readCString(path: path) { TLReadGenre($0) } }
-    static func readYear(path: String) -> Int           { Int(TLReadYear(path)) }
-    static func readComment(path: String) -> String     { readCString(path: path) { TLReadComment($0) } }
-
-    private static func readCString(
-        path: String,
-        _ call: (UnsafePointer<CChar>) -> UnsafePointer<CChar>?
-    ) -> String {
-        guard let rawPtr = path.withCString(call) else { return "" }
-        defer { free(UnsafeMutableRawPointer(mutating: rawPtr)) }
-        return String(cString: rawPtr)
+    // MARK: - Unified Reading
+    
+    static func readAllTags(path: String) -> AudioTags {
+        return path.withCString { pathC in
+            return TLReadAllTags(pathC)
+        }
     }
 }
 

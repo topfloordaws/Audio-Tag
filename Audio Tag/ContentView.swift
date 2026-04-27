@@ -10,6 +10,10 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
+#if !targetEnvironment(simulator)
+import TagLib
+#endif
+
 struct FileMetadata: Identifiable, Hashable {
     let url: URL
     var title:        String = ""
@@ -21,16 +25,18 @@ struct FileMetadata: Identifiable, Hashable {
     var yearRecorded: String = ""
     var comment:      String = ""
     var artwork:      NSImage? = nil
-    var artworkURL:   URL?      = nil
-    var artworkData: Data? = nil
-    var artworkMime: String? = nil
+    var artworkURL:   URL?     = nil
+    var artworkData:  Data?    = nil
+    var artworkMime:  String?  = nil
     
     // new
-    var dateCreated: Date? = nil
-    var dateModified: Date? = nil
+    var dateCreated:  Date?    = nil
+    var dateModified: Date?    = nil
     //var dateCreated: Date = .distantPast
     //var dateModified: Date = .distantPast
 
+    var sortableDateCreated: Date { dateCreated ?? .distantPast }
+    var sortableDateModified: Date { dateModified ?? .distantPast }
     
     var dateCreatedString: String {
         guard let dateCreated else { return "" }
@@ -79,6 +85,14 @@ struct ContentView: View {
     @State private var duration: Double = 0     // seconds
     @State private var currentTime: Double = 0  // seconds
     @State private var isUserSeeking = false    // disables timer update during user drag
+    
+    // for error handling
+    @State private var showingErrorAlert: Bool = false
+    @State private var alertMessage: String = ""
+    
+    // for clear tags safety check
+    @State private var showingClearTagsAlert: Bool = false
+    @State private var fileToClear: FileMetadata? = nil
 
     private let tagger    = AudioConverter()
     private let converter = AudioConverter()
@@ -97,81 +111,121 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            HSplitView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Button("Browse Folder", action: pickFolder)
-                        if currentFolder != nil {
-                            Button("Refresh") { Task { await loadFiles(in: currentFolder!) } }
-                        }
-                    }
-                    Divider()
-                    if selectedIDs.count == 1, let sel = selectedIDs.first,
-                       let file = fileItems.first(where: { $0.id == sel }) {
-                        metadataEditor(for: file)
-                    } else if selectedIDs.count > 1 {
-                        BatchMetadataEditor(
-                            selected: selectedIDs,
-                            fileItems: $fileItems,
-                            onApply: { status = "Updated \(selectedIDs.count) files." },
-                            applyTags: { file in
-                                applyTags(to: file)
-                            }
-                        )
-                    } else {
-                        Text("Select a file in the table to view/edit its tags.")
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text(status).foregroundColor(.secondary)
+            // Invisible buttons to act as Native Keyboard Shortcuts for File operations
+            Button("") { pickFolder() }
+                .keyboardShortcut("o", modifiers: .command)
+                .hidden()
+            
+            Button("") {
+                if let folder = currentFolder { Task { await loadFiles(in: folder) } }
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .hidden()
 
-                    if isSearching {
-                            HStack {
-                                TextField("Search...", text: $searchText)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                    .onSubmit { isSearching = false }
-                                    .onExitCommand {
-                                        isSearching = false
-                                        searchText = ""
+            HSplitView {
+                // Left Pane
+                ZStack {
+                    Color(NSColor.windowBackgroundColor)
+                        .ignoresSafeArea()
+                    
+                    Group {
+                        if currentFolder == nil {
+                            VStack {
+                                Spacer()
+                                Button("Browse Folder", action: pickFolder)
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.large)
+                                Spacer()
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if selectedIDs.count == 1, let sel = selectedIDs.first,
+                                   let file = fileItems.first(where: { $0.id == sel }) {
+                                    metadataEditor(for: file)
+                                } else if selectedIDs.count > 1 {
+                                    BatchMetadataEditor(
+                                        selected: selectedIDs,
+                                        fileItems: $fileItems,
+                                        onApply: { status = "Updated \(selectedIDs.count) files." },
+                                        applyTags: { file in
+                                            applyTags(to: file)
+                                        }
+                                    )
+                                } else {
+                                    Spacer()
+                                }
+                                
+                                Text(status).foregroundColor(.secondary)
+
+                                if isSearching {
+                                    HStack {
+                                        TextField("Search...", text: $searchText)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .onSubmit { isSearching = false }
+                                            .onExitCommand {
+                                                isSearching = false
+                                                searchText = ""
+                                            }
+                                        Button("Cancel") {
+                                            isSearching = false
+                                            searchText = ""
+                                        }
                                     }
-                                Button("Cancel") {
-                                    isSearching = false
-                                    searchText = ""
+                                }
+                                
+                                // Centered Conversion Buttons and Output Path
+                                VStack(spacing: 8) {
+                                    HStack {
+                                        Spacer()
+                                        Button("→ MP3") {
+                                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
+                                                convert(url, toExt: "mp3")
+                                            }
+                                        }
+                                        Button("→ M4A") {
+                                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
+                                                convert(url, toExt: "m4a")
+                                            }
+                                        }
+                                        Button("Set Output") {
+                                            let panel = NSOpenPanel()
+                                            panel.canChooseFiles = false
+                                            panel.canChooseDirectories = true
+                                            panel.allowsMultipleSelection = false
+                                            if panel.runModal() == .OK, let url = panel.url {
+                                                outputFolder = url
+                                            }
+                                        }
+                                        Spacer()
+                                    }
+
+                                    if let outputFolder = outputFolder {
+                                        Text("Saving to: \(outputFolder.path)")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                    }
                                 }
                             }
                         }
-                    HStack {
-                        Button("→ MP3") {
-                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
-                                convert(url, toExt: "mp3")
-                            }
-                        }
-                        Button("→ M4A") {
-                            for url in fileItems.filter({ selectedIDs.contains($0.id) }).map(\.url) {
-                                convert(url, toExt: "m4a")
-                            }
-                        }
-                        Button("Set Output Folder") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseFiles = false
-                            panel.canChooseDirectories = true
-                            panel.allowsMultipleSelection = false
-                            if panel.runModal() == .OK, let url = panel.url {
-                                outputFolder = url
-                            }
-                        }
-                        if let outputFolder = outputFolder {
-                            Text("Saving to: \(outputFolder.path)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
                     }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(NSColor.textBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                    .padding(12)
                 }
-                .padding()
-                .frame(minWidth: 210)
+                .frame(width: 320) // Locked width for Xcode-style static sidebar
                 
+                // Right Pane
                 VStack {
                     Table(filteredItems, selection: $selectedIDs, sortOrder: $sortOrder) {
                         TableColumn("Filename", value: \.url.lastPathComponent) { item in
@@ -192,6 +246,8 @@ struct ContentView: View {
                                             if let jpeg = img.toJPEGData() {
                                                 try? jpeg.write(to: tmpJ)
                                                 meta.artworkURL = tmpJ
+                                                meta.artworkData = jpeg
+                                                meta.artworkMime = "image/jpeg"
                                             } else {
                                                 meta.artworkURL = nil
                                             }
@@ -204,6 +260,11 @@ struct ContentView: View {
                                         }
                                     }
                                     .disabled(copiedTags == nil || copiedTags?.url == item.url)
+                                    
+                                    Button("Clear Tags") {
+                                        fileToClear = item
+                                        showingClearTagsAlert = true
+                                    }
                                 }
                         }
                             .width(min: 100, ideal: 200, max: 300)
@@ -217,11 +278,11 @@ struct ContentView: View {
                             .width(min: 60, ideal: 70, max: 80)
                         TableColumn("Year Recorded", value: \.yearRecorded)
                             .width(min: 60, ideal: 90, max: 140)
-                        TableColumn("Date Created") { item in
+                        TableColumn("Date Created", value: \.sortableDateCreated) { item in
                             Text(item.dateCreatedString)
                         }
                             .width(min: 60, ideal: 80, max: 140)
-                        TableColumn("Date Modified") { item in
+                        TableColumn("Date Modified", value: \.sortableDateModified) { item in
                             Text(item.dateModifiedString)
                         }
                             .width(min: 60, ideal: 80, max: 140)
@@ -230,8 +291,14 @@ struct ContentView: View {
                     .onChange(of: sortOrder) { _, newValue in
                         fileItems.sort(using: newValue)
                     }
+                    .onChange(of: selectedIDs) { _, newSelection in
+                        if newSelection.count == 1, let url = newSelection.first {
+                            Task { await loadArtworkIfNeeded(for: url) }
+                        }
+                    }
                     .frame(minWidth: 790)
                 }
+                .frame(minWidth: 600, maxWidth: .infinity)
             }
             .frame(minWidth: 1000, minHeight: 500)
             .onAppear {
@@ -247,12 +314,20 @@ struct ContentView: View {
                     }
                     return event
                 }
+                NotificationCenter.default.addObserver(forName: NSNotification.Name("OpenFolderMenuAction"), object: nil, queue: .main) { _ in
+                    pickFolder()
+                }
+                NotificationCenter.default.addObserver(forName: NSNotification.Name("RefreshFolderMenuAction"), object: nil, queue: .main) { _ in
+                    if let folder = currentFolder { Task { await loadFiles(in: folder) } }
+                }
             }
             if isLoading {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                 VStack(spacing: 10) {
-                    ProgressView("Loading files…")
+                    ProgressView("Indexing Files…", value: Double(filesLoaded), total: Double(filesTotal))
+                        .progressViewStyle(.linear)
+                        .frame(width: 200)
                     Text("\(filesLoaded) of \(filesTotal) files")
                         .foregroundColor(.secondary)
                         .font(.callout)
@@ -261,6 +336,21 @@ struct ContentView: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.windowBackgroundColor)))
                 .shadow(radius: 8)
             }
+        }
+        .alert("Error Encountered", isPresented: $showingErrorAlert) {
+            Button("OK", role: .cancel) {
+                if status == "Update failed" || status == "Conversion failed" {
+                    status = "Ready"
+                }
+            }
+        } message: {
+            Text(alertMessage)
+        }
+        .alert("Are you sure you want to clear the tags of this file?", isPresented: $showingClearTagsAlert, presenting: fileToClear) { file in
+            Button("Yes", role: .destructive) {
+                clearTags(for: file)
+            }
+            Button("No", role: .cancel) {}
         }
     }
 
@@ -278,113 +368,127 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Load files & extract metadata
+    // MARK: - CONCURRENT LOADING (Lazy/Parallel Indexing)
 
     private func loadFiles(in folder: URL) async {
-        let exts = ["mp3","m4a","wav"]
-        let urls = (try? FileManager.default
-            .contentsOfDirectory(at: folder,
-                                 includingPropertiesForKeys: nil,
-                                 options: .skipsHiddenFiles)
-            .filter { exts.contains($0.pathExtension.lowercased()) }
-        ) ?? []
+        await MainActor.run {
+            self.fileItems = []
+            self.filesLoaded = 0
+            self.filesTotal = 0
+            self.isLoading = true
+            self.status = "Locating files..."
+        }
 
-        var items: [FileMetadata] = urls.map { FileMetadata(url: $0) }
-        let total = items.count
+        let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
+        let urls = await Task.detached {
+            let exts = ["mp3", "m4a", "wav"]
+            return (try? FileManager.default
+                .contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: .skipsHiddenFiles)
+                .filter { exts.contains($0.pathExtension.lowercased()) }
+            ) ?? []
+        }.value
+
+        await MainActor.run {
+            self.filesTotal = urls.count
+            self.status = "Indexing..."
+        }
+
+        // Isolate state mutation: Aggregate results locally to prevent SwiftUI Table thrashing
+        var localItems: [FileMetadata] = []
+        localItems.reserveCapacity(urls.count)
+
+        await withTaskGroup(of: FileMetadata?.self) { group in
+            let maxConcurrentTasks = 8
+            var index = 0
+            
+            while index < min(maxConcurrentTasks, urls.count) {
+                let url = urls[index]
+                group.addTask { return await self.extractMetadata(for: url) }
+                index += 1
+            }
+            
+            for await result in group {
+                if let meta = result {
+                    localItems.append(meta)
+                    await MainActor.run {
+                        self.filesLoaded += 1
+                    }
+                }
+                
+                if index < urls.count {
+                    let url = urls[index]
+                    group.addTask { return await self.extractMetadata(for: url) }
+                    index += 1
+                }
+            }
+        }
+
+        // Apply global state mutation exactly once
+        await MainActor.run {
+            self.fileItems = localItems
+            if !self.sortOrder.isEmpty {
+                self.fileItems.sort(using: self.sortOrder)
+            }
+            self.isLoading = false
+            self.status = "Ready: \(self.fileItems.count) files"
+        }
+    }
+
+    private func extractMetadata(for url: URL) async -> FileMetadata? {
+        var item = FileMetadata(url: url)
+        let resourceKeys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
+        let resourceValues = try? url.resourceValues(forKeys: Set(resourceKeys))
+        item.dateCreated = resourceValues?.creationDate
+        item.dateModified = resourceValues?.contentModificationDate
+
+        let ext = url.pathExtension.lowercased()
+
+        if ext == "mp3" {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+                item.title = url.lastPathComponent
+                return item
+            }
+            #endif
+            
+            #if !targetEnvironment(simulator)
+            let tags = MP3Tagger.readAllTags(path: url.path)
+            item.title        = tags.title
+            item.artist       = tags.artist
+            item.album        = tags.album
+            item.albumArtist  = tags.albumArtist
+            item.track        = tags.track > 0 ? "\(tags.track)" : ""
+            item.genre        = tags.genre
+            item.yearRecorded = tags.year > 0 ? "\(tags.year)" : ""
+            item.comment      = tags.comment
+            #endif
+        } else {
+            let asset = AVURLAsset(url: url)
+            if let common = try? await asset.load(.commonMetadata) {
+                item.title = (try? await common.first(where: { $0.commonKey == AVMetadataKey.commonKeyTitle })?.load(.stringValue)) ?? ""
+                item.artist = (try? await common.first(where: { $0.commonKey == AVMetadataKey.commonKeyArtist })?.load(.stringValue)) ?? ""
+                item.album = (try? await common.first(where: { $0.commonKey == AVMetadataKey.commonKeyAlbumName })?.load(.stringValue)) ?? ""
+            }
+        }
         
-        await MainActor.run {
-            isLoading = true
-            loadingProgress = 0
-            loadingMessage = "Loading files..."
-            //filesLoaded = 0
-            filesTotal = urls.count
-        }
+        return item
+    }
 
-        // Read metadata for each file
-        for idx in items.indices {
-            let url = items[idx].url
-            let resourceKeys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
-            let resourceValues = try? url.resourceValues(forKeys: Set(resourceKeys))
-            items[idx].dateCreated = resourceValues?.creationDate
-            items[idx].dateModified = resourceValues?.contentModificationDate
-
-            let ext = url.pathExtension.lowercased()
-
-            if ext == "mp3" {
-                // Use TagLib/MP3Tagger for all fields except artwork
-                items[idx].title        = MP3Tagger.readTitle(path: url.path)
-                items[idx].artist       = MP3Tagger.readArtist(path: url.path)
-                items[idx].album        = MP3Tagger.readAlbum(path: url.path)
-                items[idx].albumArtist  = MP3Tagger.readAlbumArtist(path: url.path)
-                let trackNum            = MP3Tagger.readTrack(path: url.path)
-                items[idx].track        = trackNum > 0 ? "\(trackNum)" : ""
-                items[idx].genre        = MP3Tagger.readGenre(path: url.path)
-                let yearNum             = MP3Tagger.readYear(path: url.path)
-                items[idx].yearRecorded = yearNum > 0 ? "\(yearNum)" : ""
-                items[idx].comment      = MP3Tagger.readComment(path: url.path)
-
-                // Still use AVAsset for artwork only
-                let asset = AVURLAsset(url: url)
-                if let common = try? await asset.load(.commonMetadata) {
-                    if let it = common.first(where: { $0.commonKey == .commonKeyArtwork }),
-                       let d  = try? await it.load(.dataValue),
-                       let i  = NSImage(data: d)
-                    {
-                        items[idx].artwork = i
-                        if let jpeg = i.toJPEGData() {
-                            let tmpJ = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(UUID().uuidString)
-                                .appendingPathExtension("jpg")
-                            try? jpeg.write(to: tmpJ)
-                            items[idx].artworkURL = tmpJ
-                        }
-                    }
-                }
-            } else {
-                // m4a, wav, etc. - use AVAsset as before
-                let asset = AVURLAsset(url: url)
-                if let common = try? await asset.load(.commonMetadata) {
-                    if let it = common.first(where: { $0.commonKey == .commonKeyTitle }),
-                       let s  = try? await it.load(.stringValue) {
-                        items[idx].title = s
-                    }
-                    if let it = common.first(where: { $0.commonKey == .commonKeyArtist }),
-                       let s  = try? await it.load(.stringValue) {
-                        items[idx].artist = s
-                    }
-                    if let it = common.first(where: { $0.commonKey == .commonKeyAlbumName }),
-                       let s  = try? await it.load(.stringValue) {
-                        items[idx].album = s
-                    }
-                    if let it = common.first(where: { $0.commonKey == .commonKeyArtwork }),
-                       let d  = try? await it.load(.dataValue),
-                       let i  = NSImage(data: d)
-                    {
-                        items[idx].artwork = i
-                        if let jpeg = i.toJPEGData() {
-                            let tmpJ = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(UUID().uuidString)
-                                .appendingPathExtension("jpg")
-                            try? jpeg.write(to: tmpJ)
-                            items[idx].artworkURL = tmpJ
-                        }
-                    }
-                }
-            }
-            let progress = Double(idx + 1) / Double(total)
+    private func loadArtworkIfNeeded(for url: URL) async {
+        guard let idx = fileItems.firstIndex(where: { $0.url == url }),
+              fileItems[idx].artwork == nil else { return }
+        
+        let asset = AVURLAsset(url: url)
+        if let common = try? await asset.load(.commonMetadata),
+           let it = common.first(where: { $0.commonKey == AVMetadataKey.commonKeyArtwork }),
+           let d  = try? await it.load(.dataValue),
+           let i  = NSImage(data: d) {
+            
             await MainActor.run {
-                loadingProgress = progress
-                filesLoaded = idx + 1
+                if let currentIdx = self.fileItems.firstIndex(where: { $0.url == url }) {
+                    self.fileItems[currentIdx].artwork = i
+                }
             }
-        }
-
-        await MainActor.run {
-            fileItems   = items
-            selectedIDs = []
-            status      = "Found \(urls.count) files"
-            isLoading = false
-            loadingProgress = 0
-            loadingMessage = ""
         }
     }
 
@@ -441,27 +545,54 @@ struct ContentView: View {
                 TextField("", text: binding(for: \.comment, in: file))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
             }
-            if let img = file.artwork {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 200)
+            
+            // Artwork Section
+            Group {
+                if let img = file.artwork {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 200) // Stabilized dimensions
+                        .cornerRadius(8)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .contextMenu {
+                            Button("Extract Artwork") {
+                                extractArtwork(from: file)
+                            }
+                        }
+                } else {
+                    // Placeholder for missing artwork
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(NSColor.windowBackgroundColor))
+                            .frame(width: 200, height: 200)
+                        
+                        Image(systemName: "music.note")
+                            .font(.system(size: 64))
+                            .foregroundColor(.secondary.opacity(0.3))
+                    }
                     .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                }
             }
 
-            HStack {
+            // Grouped Action Controls
+            HStack(spacing: 12) {
                 Spacer()
-                Button("Change Cover") {
+                Button("Edit Artwork") {
                     coverTargetURL = file.url
                     isShowingCoverPicker = true
                 }
+                .buttonStyle(.bordered)
+                
+                Button("Apply Tags") {
+                    applyTags(to: file)
+                }
+                .buttonStyle(.bordered)
                 Spacer()
             }
-            HStack {
-                Spacer()
-                Button("Apply Tags") { applyTags(to: file) }
-                Spacer()
-            }
+            .padding(.top, 4)
 
             Spacer()
             
@@ -476,7 +607,6 @@ struct ContentView: View {
                             player = AVPlayer(url: audioURL)
                             if let item = player?.currentItem {
                                 Task {
-                                    // Loads the duration asynchronously, modern syntax (macOS 13+)
                                     let durationSeconds = try? await item.asset.load(.duration).seconds
                                     await MainActor.run {
                                         duration = durationSeconds ?? 0
@@ -504,7 +634,6 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             
-            // Progress/Seek Bar
             Slider(value: Binding(
                 get: { currentTime },
                 set: { newValue in
@@ -528,7 +657,6 @@ struct ContentView: View {
             }
 
         }
-        .padding(.top, 16)
         .fileImporter(isPresented: $isShowingCoverPicker,
                       allowedContentTypes: [.image],
                       allowsMultipleSelection: false) { result in
@@ -537,23 +665,19 @@ struct ContentView: View {
                   let idx = fileItems.firstIndex(where: { $0.url == coverTargetURL })
             else { return }
 
-            // Read bytes immediately (inside the sandboxed access window)
             if let data = try? Data(contentsOf: picked),
                let img  = NSImage(data: data) {
-
                 fileItems[idx].artwork     = img
                 fileItems[idx].artworkData = data
                 let ext = picked.pathExtension.lowercased()
                 fileItems[idx].artworkMime = (ext == "png") ? "image/png" : "image/jpeg"
             }
         }
-        // Periodically update the current playback time, but don't update during slider drag
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             if let player = player, !isUserSeeking {
                 currentTime = player.currentTime().seconds
             }
         }
-        // Reset state when selected file changes (NEW macOS 14+ syntax)
         .onChange(of: file.url) {
             player?.pause()
             player = nil
@@ -563,7 +687,6 @@ struct ContentView: View {
         }
     }
     
-    // Helper for time formatting
     private func timeString(_ seconds: Double) -> String {
         guard seconds.isFinite else { return "--:--" }
         let sec = Int(seconds)
@@ -571,8 +694,6 @@ struct ContentView: View {
         let rem = sec % 60
         return String(format: "%d:%02d", min, rem)
     }
-
-    // Two Way Binding Helper
 
     private func binding<Value>(
         for keyPath: WritableKeyPath<FileMetadata, Value>,
@@ -587,23 +708,28 @@ struct ContentView: View {
         )
     }
 
-    // Tag Dispatch
-
     private func applyTags(to file: FileMetadata) {
         status = "Tagging…"
-        let ext = file.url.pathExtension.lowercased()
+        player?.pause()
+        player = nil
 
+        let ext = file.url.pathExtension.lowercased()
         guard let idx = fileItems.firstIndex(where: { $0.url == file.url }) else { return }
         let current = fileItems[idx]
 
         switch ext {
         case "mp3":
             let coverData = current.artworkURL.flatMap { try? Data(contentsOf: $0) }
+            let finalCoverData = coverData ?? current.artworkData
+            
             let coverMime: String? = {
-                guard let url = current.artworkURL else { return nil }
-                return url.pathExtension.lowercased() == "png"
-                    ? "image/png" : "image/jpeg"
+                guard let url = current.artworkURL else {
+                    return current.artworkMime ?? "image/jpeg"
+                }
+                return url.pathExtension.lowercased() == "png" ? "image/png" : "image/jpeg"
             }()
+            
+            #if !targetEnvironment(simulator)
             let success = MP3Tagger.updateTags(
                 path:        current.url.path,
                 title:       current.title.isEmpty        ? nil : current.title,
@@ -614,10 +740,17 @@ struct ContentView: View {
                 year:        Int(current.yearRecorded),
                 genre:       current.genre.isEmpty        ? nil : current.genre,
                 comment:     current.comment.isEmpty      ? nil : current.comment,
-                coverData:   current.artworkData,
-                coverMime:   current.artworkData != nil ? (current.artworkMime ?? "image/png") : nil
+                coverData:   finalCoverData,
+                coverMime:   finalCoverData != nil ? coverMime : nil
             )
-            status = success ? "Tags updated" : "Error: Tag update failed"
+            if success {
+                status = "Tags updated"
+            } else {
+                alertMessage = "MP3 Tag update failed."
+                showingErrorAlert = true
+                status = "Update failed"
+            }
+            #endif
 
         case "m4a":
             tagger.tagM4A(
@@ -633,10 +766,11 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success:
-                        status = "Tags updated"
+                    case .success: status = "Tags updated"
                     case .failure(let err):
-                        status = "Error: \(err.localizedDescription)"
+                        alertMessage = err.localizedDescription
+                        showingErrorAlert = true
+                        status = "Update failed"
                     }
                 }
             }
@@ -654,10 +788,11 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success:
-                        status = "Tags updated"
+                    case .success: status = "Tags updated"
                     case .failure(let err):
-                        status = "Error: \(err.localizedDescription)"
+                        alertMessage = err.localizedDescription
+                        showingErrorAlert = true
+                        status = "Update failed"
                     }
                 }
             }
@@ -666,227 +801,144 @@ struct ContentView: View {
             status = "Unsupported file type: \(ext.uppercased())"
         }
     }
+    
+    private func clearTags(for target: FileMetadata) {
+        guard let idx = fileItems.firstIndex(where: { $0.url == target.url }) else { return }
+        fileItems[idx].title = ""; fileItems[idx].artist = ""; fileItems[idx].album = ""
+        fileItems[idx].albumArtist = ""; fileItems[idx].track = ""; fileItems[idx].genre = ""
+        fileItems[idx].yearRecorded = ""; fileItems[idx].comment = ""; fileItems[idx].artwork = nil
+        fileItems[idx].artworkURL = nil; fileItems[idx].artworkData = nil; fileItems[idx].artworkMime = nil
+        applyTags(to: fileItems[idx])
+    }
 
     private func pasteTags(onto target: FileMetadata) {
-        guard let idx = fileItems.firstIndex(where: { $0.url == target.url }),
-              let source = copiedTags
-        else { return }
-
-        // Only copy actual tag fields, not URLs or dates
-        fileItems[idx].title        = source.title
-        fileItems[idx].artist       = source.artist
-        fileItems[idx].album        = source.album
-        fileItems[idx].albumArtist  = source.albumArtist
-        fileItems[idx].track        = source.track
-        fileItems[idx].genre        = source.genre
+        guard let idx = fileItems.firstIndex(where: { $0.url == target.url }), let source = copiedTags else { return }
+        fileItems[idx].title = source.title; fileItems[idx].artist = source.artist; fileItems[idx].album = source.album
+        fileItems[idx].albumArtist = source.albumArtist; fileItems[idx].track = source.track; fileItems[idx].genre = source.genre
         fileItems[idx].yearRecorded = source.yearRecorded
 
-        // Deep copy artwork
-        if let img = source.artwork,
-           let data = img.tiffRepresentation,
-           let copiedImg = NSImage(data: data)
-        {
+        if let img = source.artwork, let data = img.tiffRepresentation, let copiedImg = NSImage(data: data) {
             fileItems[idx].artwork = copiedImg
-            let tmpJ = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("jpg")
+            let tmpJ = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
             if let jpeg = img.toJPEGData() {
                 try? jpeg.write(to: tmpJ)
-                fileItems[idx].artworkURL = tmpJ
-            } else {
-                fileItems[idx].artworkURL = nil
+                fileItems[idx].artworkURL = tmpJ; fileItems[idx].artworkData = jpeg; fileItems[idx].artworkMime = "image/jpeg"
             }
-        } else {
-            fileItems[idx].artwork = nil
-            fileItems[idx].artworkURL = nil
         }
-
-        // Optionally, selects the target file so that the sidebar shows its tags
         selectedIDs = [target.url]
     }
 
-    // Conversion Dispatch
     private func convert(_ url: URL, toExt ext: String) {
-        let out: URL
-        if let folder = outputFolder {
-            out = folder.appendingPathComponent(url.deletingPathExtension().lastPathComponent)
-                        .appendingPathExtension(ext)
-        } else {
-            out = url.deletingPathExtension().appendingPathExtension(ext)
-        }
+        let out = outputFolder?.appendingPathComponent(url.deletingPathExtension().lastPathComponent).appendingPathExtension(ext) ?? url.deletingPathExtension().appendingPathExtension(ext)
         status = "⏳ Converting"
         switch (url.pathExtension.lowercased(), ext) {
-        case ("wav", "mp3"):
+        case ("wav", "mp3"), ("m4a", "mp3"), ("mp3", "mp3"):
             converter.robustM4AToMP3(input: url, output: out) { res in
                 DispatchQueue.main.async {
                     switch res {
-                    case .success:
-                        status = "Saved \(out.lastPathComponent)"
+                    case .success: status = "Saved \(out.lastPathComponent)"; addConvertedFile(url: out)
                     case .failure(let err):
-                        status = "Conversion error: \(err.localizedDescription)"
+                        alertMessage = err.localizedDescription; showingErrorAlert = true; status = "Conversion failed"
                     }
                 }
             }
-            
-        case ("m4a", "mp3"):
-            converter.robustM4AToMP3(input: url, output: out) { res in
-                DispatchQueue.main.async {
-                    switch res {
-                    case .success:
-                        status = "Saved \(out.lastPathComponent)"
-                    case .failure(let err):
-                        status = "Conversion error: \(err.localizedDescription)"
-                    }
-                }
-            }
-
-        case ("mp3", "mp3"):
-            converter.robustM4AToMP3(input: url, output: out) { res in
-                DispatchQueue.main.async {
-                    switch res {
-                    case .success:
-                        status = "Saved \(out.lastPathComponent)"
-                    case .failure(let err):
-                        status = "Conversion error: \(err.localizedDescription)"
-                    }
-                }
-            }
-
         case ("m4a", "m4a"):
             converter.toM4A(input: url, output: out) { res in
                 DispatchQueue.main.async {
                     switch res {
-                    case .success:
-                        status = "Saved \(out.lastPathComponent)"
+                    case .success: status = "Saved \(out.lastPathComponent)"; addConvertedFile(url: out)
                     case .failure(let err):
-                        status = "Conversion error: \(err.localizedDescription)"
+                        alertMessage = err.localizedDescription; showingErrorAlert = true; status = "Conversion failed"
                     }
                 }
             }
-
-        default:
-            break
+        default: break
+        }
+    }
+    
+    private func addConvertedFile(url: URL) {
+        guard let folder = currentFolder, url.deletingLastPathComponent() == folder else { return }
+        if !fileItems.contains(where: { $0.url == url }) {
+            var newItem = FileMetadata(url: url)
+            let resourceValues = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+            newItem.dateCreated = resourceValues?.creationDate
+            newItem.dateModified = resourceValues?.contentModificationDate
+            fileItems.append(newItem); fileItems.sort(using: sortOrder)
+        }
+    }
+    
+    private func extractArtwork(from file: FileMetadata) {
+        guard let imgData = file.artworkData ?? file.artwork?.toJPEGData() else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = file.title.isEmpty ? "CoverArt" : "\(file.title)_CoverArt"
+        panel.allowedContentTypes = file.artworkMime == "image/png" ? [.png] : [.jpeg]
+        if panel.runModal() == .OK, let url = panel.url {
+            try? imgData.write(to: url)
         }
     }
 }
 
-// Calls Apply Tags for each file
 struct BatchMetadataEditor: View {
     let selected: Set<URL>
     @Binding var fileItems: [FileMetadata]
     var onApply: () -> Void
     var applyTags: (FileMetadata) -> Void
 
-    @State private var title: String = ""
-    @State private var artist: String = ""
-    @State private var album: String = ""
-    @State private var albumArtist: String = ""
-    @State private var track: String = ""
-    @State private var genre: String = ""
-    @State private var yearRecorded: String = ""
-    @State private var artwork: NSImage? = nil
-    @State private var showCoverPicker = false
-    @State private var comment: String = ""
+    @State private var title = ""; @State private var artist = ""; @State private var album = ""
+    @State private var albumArtist = ""; @State private var track = ""; @State private var genre = ""
+    @State private var yearRecorded = ""; @State private var comment = ""
+    @State private var artwork: NSImage? = nil; @State private var showCoverPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Editing \(selected.count) files").font(.headline)
             Group {
-                Text("Title").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $title)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Title (blank to skip)", text: $title).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Artist (blank to skip)", text: $artist).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Album (blank to skip)", text: $album).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Album Artist (blank to skip)", text: $albumArtist).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Track (blank to skip)", text: $track).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Genre (blank to skip)", text: $genre).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Year (blank to skip)", text: $yearRecorded).textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Comment (blank to skip)", text: $comment).textFieldStyle(RoundedBorderTextFieldStyle())
             }
+            
             Group {
-                Text("Artist").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $artist)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Album").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $album)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Album Artist").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $albumArtist)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Track").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $track)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Genre").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $genre)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Year").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $yearRecorded)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            Group {
-                Text("Comment").font(.subheadline).foregroundColor(.secondary).padding(.leading, 4)
-                TextField("Leave blank to skip", text: $comment)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-            }
-            if let img = artwork {
-                Image(nsImage: img)
-                    .resizable().scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 200)
-                    .padding(.vertical, 8)
-            }
-            HStack {
-                Spacer()
-                Button("Change Cover") { showCoverPicker = true }
-                Spacer()
-            }
-            HStack {
-                Spacer()
-                Button("Apply to All") {
-                    applyBatchTags()
-                    onApply()
+                if let img = artwork {
+                    Image(nsImage: img).resizable().scaledToFit().frame(width: 200, height: 200).cornerRadius(8).padding(.vertical, 8).frame(maxWidth: .infinity)
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.windowBackgroundColor)).frame(width: 200, height: 200)
+                        Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.secondary.opacity(0.3))
+                    }.padding(.vertical, 8).frame(maxWidth: .infinity)
                 }
+            }
+
+            HStack(spacing: 12) {
+                Spacer()
+                Button("Edit Artwork") { showCoverPicker = true }.buttonStyle(.bordered)
+                Button("Apply to All") { applyBatchTags(); onApply() }.buttonStyle(.bordered)
                 Spacer()
             }
         }
         .padding(.top, 16)
-        .fileImporter(
-            isPresented: $showCoverPicker,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case .success(let urls) = result,
-                  let picked = urls.first,
-                  let ns = NSImage(contentsOf: picked)
-            else { return }
-            artwork = ns
+        .fileImporter(isPresented: $showCoverPicker, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let picked = urls.first, let ns = NSImage(contentsOf: picked) { artwork = ns }
         }
     }
 
     private func applyBatchTags() {
         for url in selected {
             if let idx = fileItems.firstIndex(where: { $0.url == url }) {
-                if !title.isEmpty        { fileItems[idx].title        = title }
-                if !artist.isEmpty       { fileItems[idx].artist       = artist }
-                if !album.isEmpty        { fileItems[idx].album        = album }
-                if !albumArtist.isEmpty  { fileItems[idx].albumArtist  = albumArtist }
-                if !track.isEmpty        { fileItems[idx].track        = track }
-                if !genre.isEmpty        { fileItems[idx].genre        = genre }
-                if !yearRecorded.isEmpty { fileItems[idx].yearRecorded = yearRecorded }
-                if !comment.isEmpty      { fileItems[idx].comment      = comment }
-                if let img = artwork     {
+                if !title.isEmpty { fileItems[idx].title = title }; if !artist.isEmpty { fileItems[idx].artist = artist }
+                if !album.isEmpty { fileItems[idx].album = album }; if !albumArtist.isEmpty { fileItems[idx].albumArtist = albumArtist }
+                if !track.isEmpty { fileItems[idx].track = track }; if !genre.isEmpty { fileItems[idx].genre = genre }
+                if !yearRecorded.isEmpty { fileItems[idx].yearRecorded = yearRecorded }; if !comment.isEmpty { fileItems[idx].comment = comment }
+                if let img = artwork {
                     fileItems[idx].artwork = img
-                    let tmpJ = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString)
-                        .appendingPathExtension("jpg")
-                    if let jpeg = img.toJPEGData() {
-                        try? jpeg.write(to: tmpJ)
-                        fileItems[idx].artworkURL = tmpJ
-                    }
+                    let tmpJ = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
+                    if let jpeg = img.toJPEGData() { try? jpeg.write(to: tmpJ); fileItems[idx].artworkURL = tmpJ }
                 }
-                // Actually persist the tag changes to disk for each file!
                 applyTags(fileItems[idx])
             }
         }

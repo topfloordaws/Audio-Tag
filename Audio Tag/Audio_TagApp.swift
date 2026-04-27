@@ -13,7 +13,24 @@ struct Audio_TagApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-            //FolderBrowserView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .commands {
+            // Replaces the default "New" menu item with Open Folder and Refresh
+            CommandGroup(replacing: .newItem) {
+                Button("Open Folder...") {
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenFolderMenuAction"), object: nil)
+                }
+                .keyboardShortcut("o", modifiers: [.command])
+                
+                Button("Refresh") {
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshFolderMenuAction"), object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+            }
+            
+            // Includes standard View menu commands like Toggle Sidebar/Fullscreen
+            SidebarCommands()
         }
     }
 }

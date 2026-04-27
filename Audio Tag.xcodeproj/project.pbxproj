@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A83B4EF02EA0965700B903FF /* TagLib in Frameworks */ = {isa = PBXBuildFile; productRef = A83B4EEF2EA0965700B903FF /* TagLib */; };
-		A8B6F3972E0E042200FBC864 /* ffmpeg in Resources */ = {isa = PBXBuildFile; fileRef = A8B6F3962E0E042200FBC864 /* ffmpeg */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -313,7 +312,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A8B6F3972E0E042200FBC864 /* ffmpeg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

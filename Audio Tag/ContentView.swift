@@ -665,12 +665,35 @@ struct ContentView: View {
                   let idx = fileItems.firstIndex(where: { $0.url == coverTargetURL })
             else { return }
 
+            // 1. Request strict system permission to read the selected file
+            guard picked.startAccessingSecurityScopedResource() else {
+                print("Failed to access security scoped resource.")
+                return
+            }
+            // Ensure we relinquish the permission when done
+            defer { picked.stopAccessingSecurityScopedResource() }
+
             if let data = try? Data(contentsOf: picked),
                let img  = NSImage(data: data) {
+                
+                // 2. Update the UI state
                 fileItems[idx].artwork     = img
                 fileItems[idx].artworkData = data
+                
                 let ext = picked.pathExtension.lowercased()
                 fileItems[idx].artworkMime = (ext == "png") ? "image/png" : "image/jpeg"
+                
+                // 3. Cache to a temporary directory so FFmpeg has unrestricted access later
+                let tmpURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension(ext == "png" ? "png" : "jpg")
+                
+                do {
+                    try data.write(to: tmpURL)
+                    fileItems[idx].artworkURL = tmpURL // Critical fix for FFmpeg
+                } catch {
+                    print("Failed to write temporary artwork file: \(error)")
+                }
             }
         }
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in

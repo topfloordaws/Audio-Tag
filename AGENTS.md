@@ -38,6 +38,17 @@ xcodebuild -project "Audio Tag.xcodeproj" -scheme "Audio Tag" test
 
 The test targets are still empty templates.
 
+## Behaviors to preserve
+
+- **Spotify picks up re-tagged files immediately.** After Apply Tags, the song shows up in Spotify's Local Files
+  right away (as a new entry next to the old one), with no folder refresh needed, unlike Mp3tag. The owner wants this.
+  M4A/WAV are written to a temporary `name.tmp.<ext>` file in the same folder and then swapped over the original,
+  which creates new-file events Spotify's folder watcher sees. Don't change how files are written (temp file location,
+  in-place vs. replace) without checking this still works.
+- **⌘S applies tags** (single-file editor and batch editor). It is disabled when there are no unsaved changes, and the
+  batch editor asks for confirmation. Don't bind plain Return/Enter to applying tags: Return is pressed by reflex in
+  text fields and would write files by accident.
+
 ## Rules for agents
 
 - Read `docs/code-review.md` before starting work. It lists known bugs and the agreed priority order.

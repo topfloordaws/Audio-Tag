@@ -5,9 +5,9 @@ A macOS app for editing the metadata of your audio files and converting between 
 ## Features
 
 - Open a folder and see every MP3, M4A and WAV file in a sortable, searchable table (⌘O to open, ⌘R to refresh, ⌘F to search)
-- Edit title, artist, album, album artist, track, genre, year and comment
+- Edit title, artist, album, album artist, track, genre, year and comment, then press ⌘S to apply (the editor shows when there are unsaved changes)
 - Add, replace or extract cover artwork
-- Edit many files at once with the batch editor
+- Edit many files at once with the batch editor (asks for confirmation before writing)
 - Copy tags from one file and paste them onto another, or clear a file's tags
 - Convert to MP3 (LAME VBR) or M4A (AAC 192 kbps), optionally into a separate output folder
 - Preview files with the built-in player

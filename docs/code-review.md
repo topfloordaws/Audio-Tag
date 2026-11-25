@@ -5,7 +5,7 @@ Work through the sections in order. Tick items off as they are fixed, and note t
 
 ## 1. Bugs
 
-- [ ] **Clear Tags doesn't clear MP3 text fields.** The C wrapper treats `""` as "clear" and `NULL` as
+- [x] **Clear Tags doesn't clear MP3 text fields.** *(fixed on `fix/mp3-clear-tags`)* The C wrapper treats `""` as "clear" and `NULL` as
   "leave unchanged", but `TagLib.swift` (`isNilOrEmpty ? nil : …`) and `ContentView.applyTags`
   (`isEmpty ? nil : …`) turn empty strings into `nil`. Only track and year clear (because `Int("")` → 0).
   Artwork is never cleared. Blanking a single field in the editor also does nothing.
@@ -27,7 +27,9 @@ Work through the sections in order. Tick items off as they are fixed, and note t
 - [ ] `TagLibBridge/` is a stale copy of the wrapper but still referenced in the Xcode project. Remove it.
 - [ ] Consider replacing vendored `Packages/swift-taglib` with a remote Swift Package dependency.
 - [ ] Add a `.gitignore` (`xcuserdata/`, `.DS_Store`, `DerivedData/`) and untrack committed `xcuserdata/`.
-- [ ] Replace the template test stubs with real tests (e.g. MP3 tag read/write round-trip).
+- [ ] **The `Audio TagTests` target doesn't build** (can't resolve the `TagLib` and `ffmpegkit` modules), so no unit
+  tests run, including the template. Fix its build settings, then run `MP3TaggerTests.swift`.
+- [ ] Replace the template test stubs with real tests (`MP3TaggerTests.swift` is the first).
 
 ## 3. Dead code
 

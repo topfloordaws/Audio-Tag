@@ -35,7 +35,8 @@ BOOL TLTagMP3(
     const char * _Nullable comment,
     const void * _Nullable coverData,
     int         coverDataLength,
-    const char * _Nullable coverMime
+    const char * _Nullable coverMime,
+    BOOL        clearArtwork
 );
 
 // Single O(1) pass to read all metadata

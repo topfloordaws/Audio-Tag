@@ -23,11 +23,17 @@ Work through the sections in order. Tick items off as they are fixed, and note t
 
 ## 2. Repo hygiene
 
-- [ ] FFmpeg frameworks are committed twice: repo root `lib*.framework` (~29 MB) and
-  `Audio Tag/bundle-apple-framework-macos/` (~30 MB). Keep one.
-- [ ] `Resources/ffmpeg` (80 MB binary) appears unused; the app uses FFmpegKit in-process. Remove it and its
-  Xcode project reference.
-- [ ] `TagLibBridge/` is a stale copy of the wrapper but still referenced in the Xcode project. Remove it.
+- [x] FFmpeg frameworks were committed twice: unused repo-root `lib*.framework` / `ffmpegkit.framework` (~27 MB)
+  removed. *(`cleanup/remove-unused-files`)*
+- [x] `Resources/ffmpeg` (76 MB, Intel-only, never bundled) removed with its project reference. *(`cleanup/remove-unused-files`)*
+- [x] `TagLibBridge/` stale wrapper copy removed with its project reference. *(`cleanup/remove-unused-files`)*
+- [x] `Audio Tag/ffmpegkit.framework` was also copied into the app's Resources (1.3 MB); copy rule removed.
+  *(`cleanup/remove-unused-files`)*
+- [ ] **FFmpegKit headers and binary come from different copies.** The build compiles against
+  `Audio Tag/ffmpegkit.framework` but embeds `bundle-apple-framework-macos/ffmpegkit.framework`; both say 6.0 but
+  the binaries differ, and the embedded copy's headers don't compile with the current SDK. Works today, but should be
+  one copy (or FFmpegKit replaced; it is discontinued).
+- [ ] Optional: strip Intel (x86_64) code from the FFmpeg frameworks (~14 MB) if Intel Macs aren't supported.
 - [ ] Consider replacing vendored `Packages/swift-taglib` with a remote Swift Package dependency.
 - [ ] Add a `.gitignore` (`xcuserdata/`, `.DS_Store`, `DerivedData/`) and untrack committed `xcuserdata/`.
 - [ ] **The `Audio TagTests` target doesn't build** (can't resolve the `TagLib` and `ffmpegkit` modules), so no unit

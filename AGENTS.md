@@ -21,9 +21,8 @@ album artist, track, genre, year, comment, artwork) and converting between forma
 | `Audio Tag/` | App source (Swift, Obj-C++ wrapper, assets) |
 | `Audio Tag.xcodeproj` | Xcode project |
 | `Packages/swift-taglib` | Vendored TagLib (third-party, do not edit) |
-| `*.framework`, `Audio Tag/bundle-apple-framework-macos/` | Vendored FFmpegKit binaries (do not edit) |
-| `TagLibBridge/` | Old, stale copy of the TagLib wrapper. Not the live one |
-| `Resources/ffmpeg` | 80 MB standalone binary, appears unused |
+| `Audio Tag/bundle-apple-framework-macos/` | Vendored FFmpegKit + FFmpeg libraries embedded in the app (do not edit) |
+| `Audio Tag/ffmpegkit.framework` | Second FFmpegKit copy whose headers the build compiles against (first on the framework search path). Not embedded, but needed: removing it breaks the build |
 | `docs/code-review.md` | Code review: known bugs and the cleanup plan |
 
 ## Build and test

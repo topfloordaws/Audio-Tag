@@ -28,13 +28,17 @@ class MP3Tagger {
         coverMime: String? = nil,
         clearArtwork: Bool = false
     ) -> Bool {
+        let cover = (coverData?.isEmpty == false) ? coverData : nil
+        // New artwork always needs a MIME type, or the wrapper would skip it (and with clearArtwork, delete instead).
+        let mime = cover == nil ? nil : (coverMime ?? "image/jpeg")
+
         // C copies stay valid for the whole call; nil stays NULL ("leave unchanged").
-        let c = [title, artist, album, albumArtist, genre, comment, coverMime].map { $0.flatMap { strdup($0) } }
+        let c = [title, artist, album, albumArtist, genre, comment, mime].map { $0.flatMap { strdup($0) } }
         defer { c.forEach { free($0) } }
 
-        let trackValue = Int32(clamping: track ?? -1)
-        let yearValue  = Int32(clamping: year ?? -1)
-        let cover = (coverData?.isEmpty == false) ? coverData : nil
+        // Out-of-range numbers leave the field unchanged instead of writing a clamped value.
+        let trackValue = track.flatMap { Int32(exactly: $0) } ?? -1
+        let yearValue  = year.flatMap { Int32(exactly: $0) } ?? -1
 
         return path.withCString { pathC in
             func write(_ bytes: UnsafeRawPointer?, _ count: Int) -> Bool {

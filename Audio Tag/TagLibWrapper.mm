@@ -161,9 +161,16 @@ BOOL TLTagMP3(
         }
     }
 
-    // Comment (COMM) — default ENG / empty description
+    // Comment (COMM) — default ENG / empty description.
+    // Only the user-facing comment (empty description) is replaced; described COMM frames
+    // written by other apps (e.g. iTunNORM, iTunSMPB gapless info) are kept.
     if (comment) {
-        removeFrames(v2, "COMM");
+        ID3v2::FrameList existing = v2->frameList("COMM");
+        for (ID3v2::Frame *f : existing) {
+            if (static_cast<ID3v2::CommentsFrame *>(f)->description().isEmpty()) {
+                v2->removeFrame(f);
+            }
+        }
         if (comment[0] != '\0') {
             ID3v2::CommentsFrame *cf = new ID3v2::CommentsFrame(String::UTF8);
             cf->setLanguage("eng");
@@ -171,7 +178,6 @@ BOOL TLTagMP3(
             cf->setText(String(comment, String::UTF8));
             v2->addFrame(cf);
         }
-        // (if empty, we already removed all COMM frames)
     }
 
     // Artwork (APIC)
@@ -229,10 +235,13 @@ AudioTags *TLReadAllTags(const char *path) {
     tags.genre = [NSString stringWithUTF8String:tag->genre().to8Bit(true).c_str()] ?: @"";
     tags.year = tag->year();
 
-    ID3v2::FrameList comm = tag->frameList("COMM");
-    if (!comm.isEmpty()) {
-        ID3v2::CommentsFrame *cf = static_cast<ID3v2::CommentsFrame *>(comm.front());
-        tags.comment = [NSString stringWithUTF8String:cf->toString().to8Bit(true).c_str()] ?: @"";
+    // User-facing comment = the COMM frame with an empty description (matches the writer).
+    for (ID3v2::Frame *f : tag->frameList("COMM")) {
+        ID3v2::CommentsFrame *cf = static_cast<ID3v2::CommentsFrame *>(f);
+        if (cf->description().isEmpty()) {
+            tags.comment = [NSString stringWithUTF8String:cf->text().to8Bit(true).c_str()] ?: @"";
+            break;
+        }
     }
 
     return tags;

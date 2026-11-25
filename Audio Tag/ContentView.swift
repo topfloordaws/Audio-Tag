@@ -489,6 +489,8 @@ struct ContentView: View {
             await MainActor.run {
                 if let currentIdx = self.fileItems.firstIndex(where: { $0.url == url }) {
                     self.fileItems[currentIdx].artwork = i
+                    // The file still has artwork (e.g. an earlier Clear Tags failed), so don't remove it on the next apply.
+                    self.fileItems[currentIdx].artworkCleared = false
                 }
             }
         }
@@ -841,11 +843,13 @@ struct ContentView: View {
     }
 
     /// Parses a track/year field for MP3 writing: blank → 0 (clear), "3" or "3/12" → 3,
-    /// anything unparseable → nil (leave the file's value unchanged rather than wiping it).
+    /// anything else (e.g. "/12", "3/x", "abc", negatives) → nil (leave the file's value unchanged).
     private func tagNumber(_ text: String) -> Int? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return 0 }
-        guard let first = trimmed.split(separator: "/").first, let n = Int(first), n >= 0 else { return nil }
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count <= 2, let n = Int(parts[0]), n >= 0 else { return nil }
+        if parts.count == 2, Int(parts[1]) == nil { return nil }
         return n
     }
 
@@ -896,12 +900,15 @@ struct ContentView: View {
     
     private func addConvertedFile(url: URL) {
         guard let folder = currentFolder, url.deletingLastPathComponent() == folder else { return }
-        if !fileItems.contains(where: { $0.url == url }) {
-            var newItem = FileMetadata(url: url)
-            let resourceValues = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-            newItem.dateCreated = resourceValues?.creationDate
-            newItem.dateModified = resourceValues?.contentModificationDate
-            fileItems.append(newItem); fileItems.sort(using: sortOrder)
+        guard !fileItems.contains(where: { $0.url == url }) else { return }
+        // Read the converted file's tags: blank fields mean "clear" when MP3 tags are applied,
+        // so listing it with empty metadata would let one edit erase tags the file already has.
+        Task {
+            guard let newItem = await extractMetadata(for: url) else { return }
+            await MainActor.run {
+                guard !fileItems.contains(where: { $0.url == url }) else { return }
+                fileItems.append(newItem); fileItems.sort(using: sortOrder)
+            }
         }
     }
     

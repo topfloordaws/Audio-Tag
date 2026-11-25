@@ -1,0 +1,4 @@
+# Only the app's own README.md (repo root) is tracked; ignore all others.
+**/README.md
+**/readme.md
+!/README.md

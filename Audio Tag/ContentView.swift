@@ -28,7 +28,9 @@ struct FileMetadata: Identifiable, Hashable {
     var artworkURL:   URL?     = nil
     var artworkData:  Data?    = nil
     var artworkMime:  String?  = nil
-    
+    /// Set by Clear Tags so the next apply removes embedded artwork (a nil `artwork` alone may just mean "not loaded yet").
+    var artworkCleared: Bool   = false
+
     // new
     var dateCreated:  Date?    = nil
     var dateModified: Date?    = nil
@@ -753,20 +755,23 @@ struct ContentView: View {
             }()
             
             #if !targetEnvironment(simulator)
+            // MP3 fields hold the file's full tag state, so write them as shown: an empty field clears that tag.
             let success = MP3Tagger.updateTags(
-                path:        current.url.path,
-                title:       current.title.isEmpty        ? nil : current.title,
-                artist:      current.artist.isEmpty       ? nil : current.artist,
-                album:       current.album.isEmpty        ? nil : current.album,
-                albumArtist: current.albumArtist.isEmpty  ? nil : current.albumArtist,
-                track:       Int(current.track),
-                year:        Int(current.yearRecorded),
-                genre:       current.genre.isEmpty        ? nil : current.genre,
-                comment:     current.comment.isEmpty      ? nil : current.comment,
-                coverData:   finalCoverData,
-                coverMime:   finalCoverData != nil ? coverMime : nil
+                path:         current.url.path,
+                title:        current.title,
+                artist:       current.artist,
+                album:        current.album,
+                albumArtist:  current.albumArtist,
+                track:        tagNumber(current.track),
+                year:         tagNumber(current.yearRecorded),
+                genre:        current.genre,
+                comment:      current.comment,
+                coverData:    finalCoverData,
+                coverMime:    finalCoverData != nil ? coverMime : nil,
+                clearArtwork: current.artworkCleared
             )
             if success {
+                fileItems[idx].artworkCleared = false
                 status = "Tags updated"
             } else {
                 alertMessage = "MP3 Tag update failed."
@@ -831,7 +836,17 @@ struct ContentView: View {
         fileItems[idx].albumArtist = ""; fileItems[idx].track = ""; fileItems[idx].genre = ""
         fileItems[idx].yearRecorded = ""; fileItems[idx].comment = ""; fileItems[idx].artwork = nil
         fileItems[idx].artworkURL = nil; fileItems[idx].artworkData = nil; fileItems[idx].artworkMime = nil
+        fileItems[idx].artworkCleared = true
         applyTags(to: fileItems[idx])
+    }
+
+    /// Parses a track/year field for MP3 writing: blank → 0 (clear), "3" or "3/12" → 3,
+    /// anything unparseable → nil (leave the file's value unchanged rather than wiping it).
+    private func tagNumber(_ text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return 0 }
+        guard let first = trimmed.split(separator: "/").first, let n = Int(first), n >= 0 else { return nil }
+        return n
     }
 
     private func pasteTags(onto target: FileMetadata) {

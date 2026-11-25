@@ -15,7 +15,8 @@
 //       * > 0   -> set to that number
 //   - artwork:
 //       * coverData && coverDataSize > 0 && coverMimeType -> replace artwork
-//       * (all NULL/0) -> leave artwork unchanged
+//       * otherwise, clearArtwork == YES -> remove all artwork
+//       * otherwise -> leave artwork unchanged
 //
 
 #import "TagLibWrapper.h"
@@ -75,7 +76,8 @@ BOOL TLTagMP3(
     const char *comment,
     const void *coverData,
     int         coverDataSize,
-    const char *coverMimeType
+    const char *coverMimeType,
+    BOOL        clearArtwork
 ) {
     MPEG::File file(filePath);
     if (!file.isValid()) return NO;
@@ -180,6 +182,8 @@ BOOL TLTagMP3(
         pic->setType(ID3v2::AttachedPictureFrame::FrontCover);
         pic->setPicture(ByteVector(static_cast<const char *>(coverData), coverDataSize));
         v2->addFrame(pic);
+    } else if (clearArtwork) {
+        removeFrames(v2, "APIC");
     }
 
     // Enforce: strip ID3v1 + APE so the file is ID3v2-only.

@@ -168,6 +168,8 @@ struct ContentView: View {
                                             applyTags(to: file)
                                         }
                                     )
+                                    // Fresh, empty batch fields for each new multi-selection.
+                                    .id(selectedIDs)
                                 } else {
                                     Spacer()
                                 }
@@ -776,6 +778,13 @@ struct ContentView: View {
 
         switch ext {
         case "mp3":
+            // Don't save (or show as saved) a track/year that can't be written as a number.
+            if tagNumber(current.track) == nil || tagNumber(current.yearRecorded) == nil {
+                alertMessage = "Track and Year must be numbers (Track can also be like 3/12). Nothing was saved."
+                showingErrorAlert = true
+                status = "Update failed"
+                return
+            }
             let coverData = current.artworkURL.flatMap { try? Data(contentsOf: $0) }
             let finalCoverData = coverData ?? current.artworkData
             
@@ -803,7 +812,7 @@ struct ContentView: View {
                 clearArtwork: current.artworkCleared
             )
             if success {
-                markSaved(current.url, as: current.tagValues)
+                markSaved(current)
                 status = "Tags updated"
             } else {
                 alertMessage = "MP3 Tag update failed."
@@ -826,7 +835,7 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success: markSaved(current.url, as: current.tagValues); status = "Tags updated"
+                    case .success: markSaved(current); status = "Tags updated"
                     case .failure(let err):
                         alertMessage = err.localizedDescription
                         showingErrorAlert = true
@@ -848,7 +857,7 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success: markSaved(current.url, as: current.tagValues); status = "Tags updated"
+                    case .success: markSaved(current); status = "Tags updated"
                     case .failure(let err):
                         alertMessage = err.localizedDescription
                         showingErrorAlert = true
@@ -862,12 +871,16 @@ struct ContentView: View {
         }
     }
     
-    /// Records that `values` (and any pending artwork change) are now in the file.
-    private func markSaved(_ url: URL, as values: TagValues) {
-        guard let i = fileItems.firstIndex(where: { $0.url == url }) else { return }
-        fileItems[i].savedValues    = values
-        fileItems[i].artworkChanged = false
-        fileItems[i].artworkCleared = false
+    /// Records that `written` (the item as it was when the save started) is now in the file.
+    private func markSaved(_ written: FileMetadata) {
+        guard let i = fileItems.firstIndex(where: { $0.url == written.url }) else { return }
+        fileItems[i].savedValues = written.tagValues
+        // Only clear the artwork flags if the artwork wasn't changed again while an async save was running
+        // (every new pick or paste writes to a fresh temp URL).
+        if fileItems[i].artworkURL == written.artworkURL && fileItems[i].artworkCleared == written.artworkCleared {
+            fileItems[i].artworkChanged = false
+            fileItems[i].artworkCleared = false
+        }
     }
 
     private func clearTags(for target: FileMetadata) {
@@ -978,6 +991,13 @@ struct BatchMetadataEditor: View {
         artwork != nil || ![title, artist, album, albumArtist, track, genre, yearRecorded, comment].allSatisfy(\.isEmpty)
     }
 
+    /// Empties the batch fields once they've been applied, so ⌘S can't write them again.
+    private func resetFields() {
+        title = ""; artist = ""; album = ""; albumArtist = ""
+        track = ""; genre = ""; yearRecorded = ""; comment = ""
+        artwork = nil
+    }
+
     /// e.g. "Album, Year, Artwork" for the confirmation message.
     private var changedFieldNames: String {
         let fields: [(String, String)] = [("Title", title), ("Artist", artist), ("Album", album),
@@ -1030,7 +1050,7 @@ struct BatchMetadataEditor: View {
             if case .success(let urls) = result, let picked = urls.first, let ns = NSImage(contentsOf: picked) { artwork = ns }
         }
         .alert("Apply tags to \(selected.count) files?", isPresented: $showApplyConfirm) {
-            Button("Apply") { applyBatchTags(); onApply() }
+            Button("Apply") { applyBatchTags(); onApply(); resetFields() }
                 .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
         } message: {

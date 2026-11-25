@@ -17,6 +17,9 @@ Work through the sections in order. Tick items off as they are fixed, and note t
   so it can silently fail to read the image in the sandbox.
 - [ ] **M4A/WAV indexing reads only title, artist and album** (`extractMetadata`). Album artist, track, genre,
   year and comment always appear blank for those formats.
+- [ ] **M4A/WAV saving is incomplete.** `tagM4A`/`tagWAV` never write the comment, `tagWAV` never writes artwork,
+  and blank fields are skipped instead of cleared. After a save the editor shows these as saved (no "Unsaved
+  changes"), but the file doesn't have them. Fix together with the indexing bug above.
 
 ## 2. Repo hygiene
 

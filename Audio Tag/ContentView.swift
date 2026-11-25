@@ -30,6 +30,17 @@ struct FileMetadata: Identifiable, Hashable {
     var artworkMime:  String?  = nil
     /// Set by Clear Tags so the next apply removes embedded artwork (a nil `artwork` alone may just mean "not loaded yet").
     var artworkCleared: Bool   = false
+    /// Set when new artwork is picked or pasted and not yet written to the file.
+    var artworkChanged: Bool   = false
+    /// Text tags as last read from or written to the file; nil if unknown.
+    var savedValues:  TagValues? = nil
+
+    var tagValues: TagValues {
+        TagValues(title: title, artist: artist, album: album, albumArtist: albumArtist,
+                  track: track, genre: genre, yearRecorded: yearRecorded, comment: comment)
+    }
+    /// True when the editor shows something the file doesn't have yet; Apply Tags is disabled otherwise.
+    var hasUnsavedChanges: Bool { savedValues != tagValues || artworkChanged || artworkCleared }
 
     // new
     var dateCreated:  Date?    = nil
@@ -50,6 +61,10 @@ struct FileMetadata: Identifiable, Hashable {
     }
 
     var id: URL { url }
+}
+
+struct TagValues: Hashable {
+    var title, artist, album, albumArtist, track, genre, yearRecorded, comment: String
 }
 
 // NSImage to JPEG Data helper for artwork copying
@@ -153,6 +168,8 @@ struct ContentView: View {
                                             applyTags(to: file)
                                         }
                                     )
+                                    // Fresh, empty batch fields for each new multi-selection.
+                                    .id(selectedIDs)
                                 } else {
                                     Spacer()
                                 }
@@ -463,6 +480,7 @@ struct ContentView: View {
             item.genre        = tags.genre
             item.yearRecorded = tags.year > 0 ? "\(tags.year)" : ""
             item.comment      = tags.comment
+            item.savedValues  = item.tagValues
             #endif
         } else {
             let asset = AVURLAsset(url: url)
@@ -471,8 +489,9 @@ struct ContentView: View {
                 item.artist = (try? await common.first(where: { $0.commonKey == AVMetadataKey.commonKeyArtist })?.load(.stringValue)) ?? ""
                 item.album = (try? await common.first(where: { $0.commonKey == AVMetadataKey.commonKeyAlbumName })?.load(.stringValue)) ?? ""
             }
+            item.savedValues = item.tagValues
         }
-        
+
         return item
     }
 
@@ -594,9 +613,21 @@ struct ContentView: View {
                     applyTags(to: file)
                 }
                 .buttonStyle(.bordered)
+                // ⌘S, like Save elsewhere on macOS (and Mp3tag). Disabled with nothing to write,
+                // so the shortcut can't rewrite a file unnecessarily.
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!file.hasUnsavedChanges)
+                .help("Apply Tags (⌘S)")
                 Spacer()
             }
             .padding(.top, 4)
+
+            if file.hasUnsavedChanges {
+                Text("Unsaved changes · ⌘S to apply")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .frame(maxWidth: .infinity)
+            }
 
             Spacer()
             
@@ -683,6 +714,7 @@ struct ContentView: View {
                 // 2. Update the UI state
                 fileItems[idx].artwork     = img
                 fileItems[idx].artworkData = data
+                fileItems[idx].artworkChanged = true
                 
                 let ext = picked.pathExtension.lowercased()
                 fileItems[idx].artworkMime = (ext == "png") ? "image/png" : "image/jpeg"
@@ -746,6 +778,13 @@ struct ContentView: View {
 
         switch ext {
         case "mp3":
+            // Don't save (or show as saved) a track/year that can't be written as a number.
+            if tagNumber(current.track) == nil || tagNumber(current.yearRecorded) == nil {
+                alertMessage = "Track and Year must be numbers (Track can also be like 3/12). Nothing was saved."
+                showingErrorAlert = true
+                status = "Update failed"
+                return
+            }
             let coverData = current.artworkURL.flatMap { try? Data(contentsOf: $0) }
             let finalCoverData = coverData ?? current.artworkData
             
@@ -773,7 +812,7 @@ struct ContentView: View {
                 clearArtwork: current.artworkCleared
             )
             if success {
-                fileItems[idx].artworkCleared = false
+                markSaved(current)
                 status = "Tags updated"
             } else {
                 alertMessage = "MP3 Tag update failed."
@@ -796,7 +835,7 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success: status = "Tags updated"
+                    case .success: markSaved(current); status = "Tags updated"
                     case .failure(let err):
                         alertMessage = err.localizedDescription
                         showingErrorAlert = true
@@ -818,7 +857,7 @@ struct ContentView: View {
             ) { result in
                 DispatchQueue.main.async {
                     switch result {
-                    case .success: status = "Tags updated"
+                    case .success: markSaved(current); status = "Tags updated"
                     case .failure(let err):
                         alertMessage = err.localizedDescription
                         showingErrorAlert = true
@@ -832,6 +871,18 @@ struct ContentView: View {
         }
     }
     
+    /// Records that `written` (the item as it was when the save started) is now in the file.
+    private func markSaved(_ written: FileMetadata) {
+        guard let i = fileItems.firstIndex(where: { $0.url == written.url }) else { return }
+        fileItems[i].savedValues = written.tagValues
+        // Only clear the artwork flags if the artwork wasn't changed again while an async save was running
+        // (every new pick or paste writes to a fresh temp URL).
+        if fileItems[i].artworkURL == written.artworkURL && fileItems[i].artworkCleared == written.artworkCleared {
+            fileItems[i].artworkChanged = false
+            fileItems[i].artworkCleared = false
+        }
+    }
+
     private func clearTags(for target: FileMetadata) {
         guard let idx = fileItems.firstIndex(where: { $0.url == target.url }) else { return }
         fileItems[idx].title = ""; fileItems[idx].artist = ""; fileItems[idx].album = ""
@@ -865,6 +916,7 @@ struct ContentView: View {
             if let jpeg = img.toJPEGData() {
                 try? jpeg.write(to: tmpJ)
                 fileItems[idx].artworkURL = tmpJ; fileItems[idx].artworkData = jpeg; fileItems[idx].artworkMime = "image/jpeg"
+                fileItems[idx].artworkChanged = true
             }
         }
         selectedIDs = [target.url]
@@ -933,6 +985,28 @@ struct BatchMetadataEditor: View {
     @State private var albumArtist = ""; @State private var track = ""; @State private var genre = ""
     @State private var yearRecorded = ""; @State private var comment = ""
     @State private var artwork: NSImage? = nil; @State private var showCoverPicker = false
+    @State private var showApplyConfirm = false
+
+    private var hasBatchChanges: Bool {
+        artwork != nil || ![title, artist, album, albumArtist, track, genre, yearRecorded, comment].allSatisfy(\.isEmpty)
+    }
+
+    /// Empties the batch fields once they've been applied, so ⌘S can't write them again.
+    private func resetFields() {
+        title = ""; artist = ""; album = ""; albumArtist = ""
+        track = ""; genre = ""; yearRecorded = ""; comment = ""
+        artwork = nil
+    }
+
+    /// e.g. "Album, Year, Artwork" for the confirmation message.
+    private var changedFieldNames: String {
+        let fields: [(String, String)] = [("Title", title), ("Artist", artist), ("Album", album),
+                                          ("Album Artist", albumArtist), ("Track", track), ("Genre", genre),
+                                          ("Year", yearRecorded), ("Comment", comment)]
+        var names = fields.filter { !$0.1.isEmpty }.map(\.0)
+        if artwork != nil { names.append("Artwork") }
+        return names.joined(separator: ", ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -962,13 +1036,25 @@ struct BatchMetadataEditor: View {
             HStack(spacing: 12) {
                 Spacer()
                 Button("Edit Artwork") { showCoverPicker = true }.buttonStyle(.bordered)
-                Button("Apply to All") { applyBatchTags(); onApply() }.buttonStyle(.bordered)
+                // Writes many files at once, so ask first. Return/Enter confirms the dialog.
+                Button("Apply to All") { showApplyConfirm = true }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(!hasBatchChanges)
+                    .help("Apply to All (⌘S)")
                 Spacer()
             }
         }
         .padding(.top, 16)
         .fileImporter(isPresented: $showCoverPicker, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let picked = urls.first, let ns = NSImage(contentsOf: picked) { artwork = ns }
+        }
+        .alert("Apply tags to \(selected.count) files?", isPresented: $showApplyConfirm) {
+            Button("Apply") { applyBatchTags(); onApply(); resetFields() }
+                .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will overwrite \(changedFieldNames) in every selected file.")
         }
     }
 
@@ -981,6 +1067,7 @@ struct BatchMetadataEditor: View {
                 if !yearRecorded.isEmpty { fileItems[idx].yearRecorded = yearRecorded }; if !comment.isEmpty { fileItems[idx].comment = comment }
                 if let img = artwork {
                     fileItems[idx].artwork = img
+                    fileItems[idx].artworkChanged = true
                     let tmpJ = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
                     if let jpeg = img.toJPEGData() { try? jpeg.write(to: tmpJ); fileItems[idx].artworkURL = tmpJ }
                 }
